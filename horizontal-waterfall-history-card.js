@@ -619,6 +619,7 @@ class WaterfallHistoryCardEditor extends HTMLElement {
     this._shouldFocusSelectedTab = false;
     this._hasRendered = false;
     this._lastConfigString = null;
+    this._waitingForEntityPicker = false;
   }
 
   set hass(hass) {
@@ -800,6 +801,8 @@ class WaterfallHistoryCardEditor extends HTMLElement {
           .join('')
       : '<p class="threshold-empty">Keine Schwellenwerte definiert.</p>';
 
+    const removeThresholdDisabled = thresholds.length === 0 ? 'disabled' : '';
+
     const appearanceTab = `
       <div class="toggle-grid">
         <ha-formfield label="Aktuellen Wert anzeigen">
@@ -844,6 +847,10 @@ class WaterfallHistoryCardEditor extends HTMLElement {
             <ha-icon slot="icon" icon="mdi:plus"></ha-icon>
             Schwelle hinzufügen
           </mwc-button>
+          <mwc-button class="remove-threshold-action" data-remove-action="remove-last" ${removeThresholdDisabled}>
+            <ha-icon slot="icon" icon="mdi:delete"></ha-icon>
+            Letzte Schwelle entfernen
+          </mwc-button>
           <mwc-button class="reset-thresholds">
             <ha-icon slot="icon" icon="mdi:restore"></ha-icon>
             Standardwerte
@@ -851,6 +858,17 @@ class WaterfallHistoryCardEditor extends HTMLElement {
         </div>
       </div>
     `;
+
+    const supportsEntityPicker = customElements.get('ha-entity-picker') !== undefined;
+    if (!supportsEntityPicker && !this._waitingForEntityPicker) {
+      this._waitingForEntityPicker = true;
+      customElements.whenDefined('ha-entity-picker').then(() => {
+        this._waitingForEntityPicker = false;
+        if (this.isConnected) {
+          this.render();
+        }
+      });
+    }
 
     const entitiesTab = `
       <div class="entities">
@@ -864,21 +882,34 @@ class WaterfallHistoryCardEditor extends HTMLElement {
               <div class="entity-card" data-index="${index}">
                 <div class="entity-header">
                   <span>Entität ${index + 1}</span>
-                  <ha-icon-button
-                    aria-label="Entität entfernen"
-                    data-entity-index="${index}"
+                  <mwc-button
                     class="remove-entity"
-                    icon="mdi:delete"
-                  ></ha-icon-button>
+                    data-entity-index="${index}"
+                    dense
+                  >
+                    <ha-icon slot="icon" icon="mdi:delete"></ha-icon>
+                    Entfernen
+                  </mwc-button>
                 </div>
                 <div class="entity-grid">
-                  <ha-entity-picker
-                    label="Entity"
-                    value="${entity.entity ?? ''}"
-                    data-field="entity"
-                    data-entity-index="${index}"
-                    allow-custom-entity
-                  ></ha-entity-picker>
+                  ${supportsEntityPicker
+                    ? `
+                        <ha-entity-picker
+                          label="Entität"
+                          value="${entity.entity ?? ''}"
+                          data-field="entity"
+                          data-entity-index="${index}"
+                          allow-custom-entity
+                        ></ha-entity-picker>
+                      `
+                    : `
+                        <ha-textfield
+                          label="Entität"
+                          data-field="entity"
+                          data-entity-index="${index}"
+                          value="${entity.entity ?? ''}"
+                        ></ha-textfield>
+                      `}
                   <ha-textfield
                     label="Name"
                     data-field="name"
@@ -1062,6 +1093,9 @@ class WaterfallHistoryCardEditor extends HTMLElement {
           flex-wrap: wrap;
           gap: 8px;
         }
+        .threshold-actions mwc-button.remove-threshold-action {
+          --mdc-theme-primary: var(--error-color, #db4437);
+        }
         .entities {
           display: flex;
           flex-direction: column;
@@ -1079,6 +1113,9 @@ class WaterfallHistoryCardEditor extends HTMLElement {
           align-items: center;
           justify-content: space-between;
           margin-bottom: 12px;
+        }
+        .entity-header mwc-button.remove-entity {
+          --mdc-theme-primary: var(--error-color, #db4437);
         }
         .entity-grid {
           display: grid;
@@ -1193,6 +1230,11 @@ class WaterfallHistoryCardEditor extends HTMLElement {
     const addThresholdButton = this.shadowRoot.querySelector('.add-threshold');
     if (addThresholdButton) {
       addThresholdButton.addEventListener('click', () => this._addThreshold());
+    }
+
+    const removeThresholdActionButton = this.shadowRoot.querySelector('.remove-threshold-action');
+    if (removeThresholdActionButton) {
+      removeThresholdActionButton.addEventListener('click', (ev) => this._removeThreshold(ev));
     }
 
     const resetThresholdsButton = this.shadowRoot.querySelector('.reset-thresholds');
@@ -1366,14 +1408,23 @@ class WaterfallHistoryCardEditor extends HTMLElement {
   }
 
   _removeThreshold(ev) {
-    const index = Number(ev.currentTarget?.dataset?.thresholdIndex ?? ev.target?.dataset?.thresholdIndex);
+    const thresholdsSource = Array.isArray(this._config.thresholds)
+      ? this._config.thresholds
+      : [];
+
+    let index = Number(ev?.currentTarget?.dataset?.thresholdIndex ?? ev?.target?.dataset?.thresholdIndex);
     if (Number.isNaN(index)) {
+      const action = ev?.currentTarget?.dataset?.removeAction ?? ev?.target?.dataset?.removeAction;
+      if (action === 'remove-last') {
+        index = thresholdsSource.length - 1;
+      }
+    }
+
+    if (Number.isNaN(index) || index < 0 || index >= thresholdsSource.length) {
       return;
     }
 
-    const thresholds = Array.isArray(this._config.thresholds)
-      ? this._config.thresholds.filter((_, i) => i !== index)
-      : [];
+    const thresholds = thresholdsSource.filter((_, i) => i !== index);
 
     const updatedConfig = { ...this._config };
     if (thresholds.length) {
