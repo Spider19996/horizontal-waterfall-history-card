@@ -617,11 +617,22 @@ class WaterfallHistoryCardEditor extends HTMLElement {
     this._config = { entities: [] };
     this._selectedTab = 0;
     this._shouldFocusSelectedTab = false;
+    this._hasRendered = false;
   }
 
   set hass(hass) {
     this._hass = hass;
-    this.render();
+
+    if (!this._hasRendered) {
+      this.render();
+      return;
+    }
+
+    this.shadowRoot
+      ?.querySelectorAll('ha-entity-picker[data-field="entity"]')
+      .forEach((picker) => {
+        picker.hass = hass;
+      });
   }
 
   setConfig(config) {
@@ -1145,6 +1156,8 @@ class WaterfallHistoryCardEditor extends HTMLElement {
     this.shadowRoot.querySelectorAll('.remove-entity').forEach((button) => {
       button.addEventListener('click', (ev) => this._removeEntity(ev));
     });
+
+    this._hasRendered = true;
   }
 
   _entityPickerChanged(ev) {
