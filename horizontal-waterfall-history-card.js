@@ -629,8 +629,15 @@ class WaterfallHistoryCardEditor extends HTMLElement {
       ? config.entities.map((entity) => (typeof entity === 'string' ? { entity } : { ...entity }))
       : [];
 
+    const thresholds = Array.isArray(config?.thresholds)
+      ? config.thresholds.map((threshold) => ({ ...threshold }))
+      : config?.thresholds === null
+        ? null
+        : threshold_default_number.map((threshold) => ({ ...threshold }));
+
     this._config = {
       ...config,
+      thresholds,
       entities,
     };
 
