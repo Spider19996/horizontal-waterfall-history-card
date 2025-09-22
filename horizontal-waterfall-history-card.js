@@ -359,12 +359,12 @@ class waterfallHistoryCard extends HTMLElement {
           height: ${this.config.height}px;
           border-radius: 2px;
           overflow: hidden;
-          display: flex;
+          display: grid;
+          grid-template-columns: repeat(var(--segment-count, 1), minmax(0, 1fr));
           align-items: center;
           gap: var(--segment-gap, 0px);
         }
         .bar-segment {
-          flex: 1;
           height: 100%;
           transition: all 0.3s ease;
           position: relative;
@@ -455,6 +455,7 @@ class waterfallHistoryCard extends HTMLElement {
           `--segment-radius: ${segmentAppearance.radius}`,
           `--segment-aspect: ${segmentAppearance.aspectRatio}`,
           `--segment-divider-width: ${segmentAppearance.dividerWidth}`,
+          `--segment-count: ${history.length}`,
         ].join('; ');
 
         const showLabels = entityConfig.show_labels ?? this.config.show_labels;
