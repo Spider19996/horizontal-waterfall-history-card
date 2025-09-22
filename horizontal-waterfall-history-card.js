@@ -9,6 +9,22 @@ const threshold_default_boolean = [
   { value: 1, color: '#EEEEEE' },  // on
 ];
 
+const fireEvent = (node, type, detail, options) => {
+  const event = new Event(type, {
+    bubbles: options?.bubbles ?? true,
+    cancelable: options?.cancelable ?? false,
+    composed: options?.composed ?? true,
+  });
+  event.detail = detail;
+  node.dispatchEvent(event);
+  return event;
+};
+
+const lit = window.Lit || window.litElement || {};
+const LitElementBase = lit.LitElement || window.LitElement;
+const html = lit.html || window.html;
+const css = lit.css || window.css;
+
 class waterfallHistoryCard extends HTMLElement {
   // FIX: Hardcoded default domain icons
   DEFAULT_DOMAIN_ICONS = {
@@ -60,7 +76,8 @@ class waterfallHistoryCard extends HTMLElement {
     this.config = this.config || {};
     // FIX: add show_icons option (default true)
     this.config.show_icons = (config.show_icons !== false);
-if (!config.entities || !Array.isArray(config.entities) || config.entities.length === 0) {
+
+    if (!config.entities || !Array.isArray(config.entities) || config.entities.length === 0) {
       throw new Error('Please define a list of entities.');
     }
 
@@ -524,6 +541,10 @@ const history = [...(processedHistories[entityId] || [])];
       ],
     };
   }
+
+  static getConfigElement() {
+    return document.createElement('waterfall-history-card-editor');
+  }
 }
 
 customElements.define('waterfall-history-card', waterfallHistoryCard);
@@ -540,3 +561,554 @@ console.info(
   'color: orange; font-weight: bold; background: black',
   'color: white; font-weight: bold; background: dimgray'
 );
+
+if (LitElementBase && html && css && !customElements.get('waterfall-history-card-editor')) {
+  class WaterfallHistoryCardEditor extends LitElementBase {
+    static get properties() {
+      return {
+        hass: {},
+        _config: { type: Object },
+        _activeTab: { type: String },
+      };
+    }
+
+    constructor() {
+      super();
+      this._config = {};
+      this._activeTab = 'general';
+    }
+
+    setConfig(config) {
+      const safeConfig = config && typeof config === 'object' ? config : {};
+      this._config = {
+        title: 'History',
+        hours: 24,
+        intervals: 48,
+        height: 60,
+        show_labels: true,
+        show_min_max: false,
+        show_current: true,
+        show_icons: true,
+        compact: false,
+        gradient: false,
+        digits: 1,
+        ...safeConfig,
+        entities: (safeConfig.entities || []).map((entity) =>
+          typeof entity === 'string' ? { entity } : { ...entity }
+        ),
+        thresholds: Array.isArray(safeConfig.thresholds)
+          ? safeConfig.thresholds.map((item) => ({ ...item }))
+          : safeConfig.thresholds === null
+            ? null
+            : undefined,
+      };
+      this.requestUpdate();
+    }
+
+    get _thresholds() {
+      if (Array.isArray(this._config.thresholds)) {
+        return this._config.thresholds;
+      }
+      return undefined;
+    }
+
+    render() {
+      if (!html || !css) {
+        return null;
+      }
+
+      return html`
+        <div class="editor">
+          <ha-tabs
+            scrollable
+            .selected=${['general', 'entities', 'thresholds'].indexOf(this._activeTab)}
+            @iron-activate=${this._handleTabActivated}
+          >
+            <paper-tab name="general">${this._localize('ui.dialogs.helper_settings.tabs.settings', 'Settings')}</paper-tab>
+            <paper-tab name="entities">${this._localize('ui.dialogs.helper_settings.tabs.entities', 'Entities')}</paper-tab>
+            <paper-tab name="thresholds">${this._localize('ui.components.history_graph.options.thresholds', 'Thresholds')}</paper-tab>
+          </ha-tabs>
+          <div class="content">
+            ${this._activeTab === 'general' ? this._renderGeneralTab() : ''}
+            ${this._activeTab === 'entities' ? this._renderEntitiesTab() : ''}
+            ${this._activeTab === 'thresholds' ? this._renderThresholdTab() : ''}
+          </div>
+        </div>
+      `;
+    }
+
+    _renderGeneralTab() {
+      return html`
+        <div class="form-grid">
+          <ha-textfield
+            label="${this._localize('ui.panel.lovelace.editor.card.generic.title')}"
+            .value=${this._config.title ?? ''}
+            @input=${(ev) => this._updateConfigValue('title', ev.target.value)}
+          ></ha-textfield>
+          <ha-textfield
+            type="number"
+            label="${this._localize('ui.panel.lovelace.editor.card.generic.hours', 'Hours')}"
+            .value=${this._config.hours ?? ''}
+            min="1"
+            @input=${(ev) => this._updateNumericConfigValue('hours', ev.target.value)}
+          ></ha-textfield>
+          <ha-textfield
+            type="number"
+            label="${this._localize('ui.components.history_graph.options.periods', 'Intervals')}"
+            .value=${this._config.intervals ?? ''}
+            min="1"
+            @input=${(ev) => this._updateNumericConfigValue('intervals', ev.target.value)}
+          ></ha-textfield>
+          <ha-textfield
+            type="number"
+            label="${this._localize('ui.components.history_graph.options.graph_height', 'Bar height (px)')}"
+            .value=${this._config.height ?? ''}
+            min="10"
+            @input=${(ev) => this._updateNumericConfigValue('height', ev.target.value)}
+          ></ha-textfield>
+          <ha-textfield
+            type="number"
+            label="${this._localize('ui.panel.lovelace.editor.card.generic.minimum', 'Min value')}"
+            .value=${this._config.min_value ?? ''}
+            @input=${(ev) => this._updateOptionalNumericValue('min_value', ev.target.value)}
+          ></ha-textfield>
+          <ha-textfield
+            type="number"
+            label="${this._localize('ui.panel.lovelace.editor.card.generic.maximum', 'Max value')}"
+            .value=${this._config.max_value ?? ''}
+            @input=${(ev) => this._updateOptionalNumericValue('max_value', ev.target.value)}
+          ></ha-textfield>
+          <ha-textfield
+            label="${this._localize('ui.panel.lovelace.editor.card.generic.unit_of_measurement')}"
+            .value=${this._config.unit ?? ''}
+            @input=${(ev) => this._updateConfigValue('unit', ev.target.value)}
+          ></ha-textfield>
+          <ha-textfield
+            type="number"
+            label="${this._localize('ui.panel.lovelace.editor.card.generic.decimals', 'Digits')}"
+            .value=${this._config.digits ?? ''}
+            min="0"
+            max="6"
+            @input=${(ev) => this._updateNumericConfigValue('digits', ev.target.value)}
+          ></ha-textfield>
+          <ha-textfield
+            label="${this._localize('ui.components.history_graph.options.default_value', 'Default value')}"
+            .value=${this._config.default_value ?? ''}
+            @input=${(ev) => this._updateOptionalNumericValue('default_value', ev.target.value)}
+          ></ha-textfield>
+          <ha-textfield
+            label="${this._localize('ui.panel.lovelace.editor.card.generic.icon')}"
+            .value=${this._config.icon ?? ''}
+            @input=${(ev) => this._updateConfigValue('icon', ev.target.value)}
+          ></ha-textfield>
+        </div>
+        <div class="toggles">
+          ${this._renderToggleRow('show_labels', this._localize('ui.panel.lovelace.editor.card.generic.show_labels'))}
+          ${this._renderToggleRow('show_min_max', this._localize('ui.components.history_graph.options.show_extrema', 'Show min/max'))}
+          ${this._renderToggleRow('show_current', this._localize('ui.panel.lovelace.editor.card.generic.show_current', 'Show current value'))}
+          ${this._renderToggleRow('show_icons', this._localize('ui.panel.lovelace.editor.card.generic.show_icon', 'Show icons'))}
+          ${this._renderToggleRow('compact', this._localize('ui.panel.lovelace.editor.card.generic.compact_view', 'Compact'))}
+          ${this._renderToggleRow('gradient', this._localize('ui.panel.lovelace.editor.card.generic.gradient', 'Use gradient colors'))}
+        </div>
+      `;
+    }
+
+    _renderToggleRow(key, label) {
+      return html`
+        <ha-settings-row>
+          <span slot="heading">${label}</span>
+          <ha-switch
+            slot="content"
+            .checked=${this._config[key] ?? false}
+            @change=${(ev) => this._updateConfigValue(key, ev.target.checked)}
+          ></ha-switch>
+        </ha-settings-row>
+      `;
+    }
+
+    _renderEntitiesTab() {
+      const entities = this._config.entities || [];
+      return html`
+        <div class="entities">
+          ${entities.length === 0
+            ? html`<p class="hint">${this._localize('ui.panel.lovelace.editor.card.generic.no_entities')}</p>`
+            : entities.map((entity, index) => this._renderEntityEditor(entity, index))}
+          <div class="actions">
+            <mwc-button raised @click=${this._addEntity}>
+              ${this._localize('ui.panel.lovelace.editor.card.generic.add_entity')}
+            </mwc-button>
+          </div>
+        </div>
+      `;
+    }
+
+    _renderEntityEditor(entity, index) {
+      return html`
+        <ha-card outlined>
+          <div class="entity-grid">
+            <ha-entity-picker
+              .hass=${this.hass}
+              .value=${entity.entity || ''}
+              required
+              allow-custom-entity
+              @value-changed=${(ev) => this._updateEntityValue(index, 'entity', ev.detail.value)}
+            ></ha-entity-picker>
+            <ha-textfield
+              label="${this._localize('ui.panel.lovelace.editor.card.generic.name')}"
+              .value=${entity.name ?? ''}
+              @input=${(ev) => this._updateEntityValue(index, 'name', ev.target.value)}
+            ></ha-textfield>
+            <ha-textfield
+              type="number"
+              label="${this._localize('ui.panel.lovelace.editor.card.generic.hours', 'Hours')}"
+              .value=${entity.hours ?? ''}
+              min="1"
+              @input=${(ev) => this._updateEntityNumericValue(index, 'hours', ev.target.value)}
+            ></ha-textfield>
+            <ha-textfield
+              type="number"
+              label="${this._localize('ui.components.history_graph.options.periods', 'Intervals')}"
+              .value=${entity.intervals ?? ''}
+              min="1"
+              @input=${(ev) => this._updateEntityNumericValue(index, 'intervals', ev.target.value)}
+            ></ha-textfield>
+            <ha-select
+              label="${this._localize('ui.panel.lovelace.editor.card.generic.show_labels')}"
+              .value=${this._triStateValue(entity.show_labels)}
+              @value-changed=${(ev) => this._updateEntityTriState(index, 'show_labels', ev.detail.value)}
+            >
+              ${this._renderTriStateOptions()}
+            </ha-select>
+            <ha-select
+              label="${this._localize('ui.components.history_graph.options.show_extrema', 'Show min/max')}"
+              .value=${this._triStateValue(entity.show_min_max)}
+              @value-changed=${(ev) => this._updateEntityTriState(index, 'show_min_max', ev.detail.value)}
+            >
+              ${this._renderTriStateOptions()}
+            </ha-select>
+            <ha-select
+              label="${this._localize('ui.panel.lovelace.editor.card.generic.show_current', 'Show current value')}"
+              .value=${this._triStateValue(entity.show_current)}
+              @value-changed=${(ev) => this._updateEntityTriState(index, 'show_current', ev.detail.value)}
+            >
+              ${this._renderTriStateOptions()}
+            </ha-select>
+            <ha-select
+              label="${this._localize('ui.panel.lovelace.editor.card.generic.show_icon', 'Show icon')}"
+              .value=${this._triStateValue(entity.show_icons)}
+              @value-changed=${(ev) => this._updateEntityTriState(index, 'show_icons', ev.detail.value)}
+            >
+              ${this._renderTriStateOptions()}
+            </ha-select>
+            <ha-textfield
+              label="${this._localize('ui.panel.lovelace.editor.card.generic.unit_of_measurement')}"
+              .value=${entity.unit ?? ''}
+              @input=${(ev) => this._updateEntityValue(index, 'unit', ev.target.value)}
+            ></ha-textfield>
+            <ha-textfield
+              label="${this._localize('ui.panel.lovelace.editor.card.generic.icon')}"
+              .value=${entity.icon ?? ''}
+              @input=${(ev) => this._updateEntityValue(index, 'icon', ev.target.value)}
+            ></ha-textfield>
+          </div>
+          <div class="entity-actions">
+            <mwc-button class="remove" @click=${() => this._removeEntity(index)}>
+              ${this._localize('ui.common.remove')}
+            </mwc-button>
+          </div>
+        </ha-card>
+      `;
+    }
+
+    _renderThresholdTab() {
+      const thresholds = this._thresholds;
+      return html`
+        <div class="thresholds">
+          <ha-settings-row>
+            <span slot="heading">${this._localize('ui.panel.lovelace.editor.card.generic.gradient', 'Use gradient colors')}</span>
+            <ha-switch
+              slot="content"
+              .checked=${this._config.gradient ?? false}
+              @change=${(ev) => this._updateConfigValue('gradient', ev.target.checked)}
+            ></ha-switch>
+          </ha-settings-row>
+          ${Array.isArray(thresholds) && thresholds.length
+            ? thresholds.map((threshold, index) => this._renderThresholdEditor(threshold, index))
+            : html`<p class="hint">${this._localize('ui.components.history_graph.options.no_thresholds', 'Using built-in defaults.')}</p>`}
+          <div class="actions">
+            <mwc-button @click=${this._addThreshold}>${this._localize('ui.panel.lovelace.editor.card.generic.add_row', 'Add threshold')}</mwc-button>
+            ${Array.isArray(thresholds) && thresholds.length
+              ? html`<mwc-button @click=${this._clearThresholds}>${this._localize('ui.common.clear', 'Clear')}</mwc-button>`
+              : ''}
+          </div>
+        </div>
+      `;
+    }
+
+    _renderThresholdEditor(threshold, index) {
+      return html`
+        <ha-card outlined>
+          <div class="threshold-grid">
+            <ha-textfield
+              type="number"
+              label="${this._localize('ui.panel.lovelace.editor.card.generic.value')}"
+              .value=${threshold.value ?? ''}
+              @input=${(ev) => this._updateThresholdValue(index, 'value', ev.target.value)}
+            ></ha-textfield>
+            <div class="color-picker">
+              <ha-textfield
+                label="${this._localize('ui.panel.lovelace.editor.card.generic.color')}"
+                .value=${threshold.color ?? ''}
+                @input=${(ev) => this._updateThresholdValue(index, 'color', ev.target.value)}
+              ></ha-textfield>
+              <input
+                class="color-input"
+                type="color"
+                .value=${this._normalizeColor(threshold.color)}
+                @input=${(ev) => this._updateThresholdValue(index, 'color', ev.target.value)}
+              />
+            </div>
+          </div>
+          <div class="entity-actions">
+            <mwc-button class="remove" @click=${() => this._removeThreshold(index)}>${this._localize('ui.common.remove')}</mwc-button>
+          </div>
+        </ha-card>
+      `;
+    }
+
+    _renderTriStateOptions() {
+      return html`
+        <mwc-list-item value="default">${this._localize('ui.common.default', 'Default')}</mwc-list-item>
+        <mwc-list-item value="true">${this._localize('ui.common.show', 'Show')}</mwc-list-item>
+        <mwc-list-item value="false">${this._localize('ui.common.hide', 'Hide')}</mwc-list-item>
+      `;
+    }
+
+    _triStateValue(value) {
+      if (value === undefined || value === null) {
+        return 'default';
+      }
+      return value ? 'true' : 'false';
+    }
+
+    _handleTabActivated(ev) {
+      const tab = ev.detail.item?.getAttribute('name');
+      if (!tab || tab === this._activeTab) return;
+      this._activeTab = tab;
+    }
+
+    _updateConfigValue(key, value) {
+      const newConfig = { ...this._config };
+      if (value === '' || value === undefined) {
+        delete newConfig[key];
+      } else {
+        newConfig[key] = value;
+      }
+      this._commitConfig(newConfig);
+    }
+
+    _updateNumericConfigValue(key, value) {
+      if (value === '' || value === undefined) {
+        this._updateConfigValue(key, undefined);
+        return;
+      }
+      const num = Number(value);
+      if (!Number.isNaN(num)) {
+        this._updateConfigValue(key, num);
+      }
+    }
+
+    _updateOptionalNumericValue(key, value) {
+      if (value === '' || value === undefined) {
+        this._updateConfigValue(key, undefined);
+        return;
+      }
+      const num = Number(value);
+      this._updateConfigValue(key, Number.isNaN(num) ? value : num);
+    }
+
+    _addEntity() {
+      const entities = [...(this._config.entities || [])];
+      entities.push({ entity: '' });
+      this._commitConfig({ ...this._config, entities });
+    }
+
+    _removeEntity(index) {
+      const entities = [...(this._config.entities || [])];
+      entities.splice(index, 1);
+      this._commitConfig({ ...this._config, entities });
+    }
+
+    _updateEntityValue(index, key, value) {
+      const entities = [...(this._config.entities || [])];
+      const updated = { ...entities[index] };
+      if (value === '' || value === undefined) {
+        delete updated[key];
+      } else {
+        updated[key] = value;
+      }
+      entities[index] = updated;
+      this._commitConfig({ ...this._config, entities });
+    }
+
+    _updateEntityNumericValue(index, key, value) {
+      if (value === '' || value === undefined) {
+        this._updateEntityValue(index, key, undefined);
+        return;
+      }
+      const num = Number(value);
+      if (!Number.isNaN(num)) {
+        this._updateEntityValue(index, key, num);
+      }
+    }
+
+    _updateEntityTriState(index, key, value) {
+      if (value === undefined || value === 'default') {
+        this._updateEntityValue(index, key, undefined);
+        return;
+      }
+      this._updateEntityValue(index, key, value === 'true');
+    }
+
+    _addThreshold() {
+      const thresholds = Array.isArray(this._thresholds) ? [...this._thresholds] : [];
+      thresholds.push({ value: thresholds.length ? thresholds[thresholds.length - 1].value : 0, color: '#000000' });
+      this._commitConfig({ ...this._config, thresholds });
+    }
+
+    _removeThreshold(index) {
+      const thresholds = Array.isArray(this._thresholds) ? [...this._thresholds] : [];
+      thresholds.splice(index, 1);
+      const next = thresholds.length ? thresholds : undefined;
+      this._commitConfig({ ...this._config, thresholds: next });
+    }
+
+    _updateThresholdValue(index, key, value) {
+      const thresholds = Array.isArray(this._thresholds) ? [...this._thresholds] : [];
+      const updated = { ...thresholds[index] };
+      if (key === 'value') {
+        const num = Number(value);
+        if (!Number.isNaN(num)) {
+          updated.value = num;
+        }
+      } else if (key === 'color') {
+        updated.color = this._normalizeColor(value);
+      }
+      thresholds[index] = updated;
+      this._commitConfig({ ...this._config, thresholds });
+    }
+
+    _clearThresholds() {
+      const newConfig = { ...this._config };
+      delete newConfig.thresholds;
+      this._commitConfig(newConfig);
+    }
+
+    _normalizeColor(value) {
+      if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (/^#([0-9a-fA-F]{6})$/.test(trimmed)) {
+          return trimmed;
+        }
+        if (/^#([0-9a-fA-F]{3})$/.test(trimmed)) {
+          const [, short] = trimmed.match(/^#([0-9a-fA-F]{3})$/);
+          return `#${short.split('').map((c) => `${c}${c}`).join('')}`;
+        }
+        const cleaned = trimmed.replace(/[^0-9a-fA-F]/g, '');
+        if (cleaned.length === 6) {
+          return `#${cleaned}`;
+        }
+      }
+      return '#000000';
+    }
+
+    _commitConfig(config) {
+      this._config = config;
+      fireEvent(this, 'config-changed', { config });
+    }
+
+    _localize(key, fallback) {
+      if (!this.hass || !this.hass.localize) {
+        return fallback || key;
+      }
+      const localized = this.hass.localize(key);
+      return localized || fallback || key;
+    }
+
+    static get styles() {
+      return css`
+        .editor {
+          display: flex;
+          flex-direction: column;
+        }
+        ha-tabs {
+          --paper-tabs-selection-bar-color: var(--primary-color);
+          margin-bottom: 8px;
+        }
+        .content {
+          display: block;
+          gap: 16px;
+        }
+        .form-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+          gap: 16px;
+        }
+        .toggles {
+          margin-top: 16px;
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+        }
+        .entities,
+        .thresholds {
+          display: flex;
+          flex-direction: column;
+          gap: 16px;
+        }
+        .entity-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+          gap: 16px;
+          padding: 16px;
+        }
+        .threshold-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+          gap: 16px;
+          padding: 16px;
+        }
+        .color-picker {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+        .color-picker ha-textfield {
+          flex: 1;
+        }
+        .color-input {
+          width: 48px;
+          height: 48px;
+          border: none;
+          background: none;
+        }
+        .entity-actions,
+        .actions {
+          display: flex;
+          justify-content: flex-end;
+          gap: 8px;
+          padding: 0 16px 16px;
+        }
+        .hint {
+          margin: 0;
+          color: var(--secondary-text-color);
+        }
+        mwc-button.remove {
+          --mdc-theme-primary: var(--error-color);
+        }
+      `;
+    }
+  }
+
+  customElements.define('waterfall-history-card-editor', WaterfallHistoryCardEditor);
+}
