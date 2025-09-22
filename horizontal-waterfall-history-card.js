@@ -618,6 +618,7 @@ const registerWaterfallHistoryCardEditor = () => {
         hass: {},
         _config: { type: Object },
         _activeTab: { type: String },
+        _cardModError: { type: Boolean },
       };
     }
 
@@ -625,6 +626,7 @@ const registerWaterfallHistoryCardEditor = () => {
       super();
       this._config = {};
       this._activeTab = 'general';
+      this._cardModError = false;
     }
 
     setConfig(config) {
@@ -649,16 +651,13 @@ const registerWaterfallHistoryCardEditor = () => {
           ? safeConfig.thresholds.map((item) => ({ ...item }))
           : safeConfig.thresholds === null
             ? null
-            : undefined,
+            : safeConfig.thresholds === undefined
+              ? null
+              : undefined,
+        card_mod: this._cloneCardMod(safeConfig.card_mod),
       };
+      this._cardModError = false;
       this.requestUpdate();
-    }
-
-    get _thresholds() {
-      if (Array.isArray(this._config.thresholds)) {
-        return this._config.thresholds;
-      }
-      return undefined;
     }
 
     render() {
@@ -759,6 +758,21 @@ const registerWaterfallHistoryCardEditor = () => {
           ${this._renderToggleRow('compact', this._localize('ui.panel.lovelace.editor.card.generic.compact_view', 'Compact'))}
           ${this._renderToggleRow('gradient', this._localize('ui.panel.lovelace.editor.card.generic.gradient', 'Use gradient colors'))}
         </div>
+        <ha-settings-row class="card-mod-row">
+          <span slot="heading">card_mod</span>
+          <span slot="description">${this._localize('ui.panel.lovelace.editor.card.generic.optional', 'Optional')}</span>
+          <div slot="content" class="card-mod-editor">
+            <ha-yaml-editor
+              .label=${'card_mod'}
+              .value=${this._serializeCardMod(this._config.card_mod)}
+              .error=${this._cardModError}
+              @value-changed=${this._handleCardModChanged}
+            ></ha-yaml-editor>
+            ${this._cardModError
+              ? html`<p class="error">${this._localize('ui.errors.config_editor.entry', 'Invalid YAML/JSON')}</p>`
+              : ''}
+          </div>
+        </ha-settings-row>
       `;
     }
 
@@ -773,6 +787,77 @@ const registerWaterfallHistoryCardEditor = () => {
           ></ha-switch>
         </ha-settings-row>
       `;
+    }
+
+    _cloneCardMod(cardMod) {
+      if (!cardMod || typeof cardMod !== 'object') {
+        return cardMod;
+      }
+      if (typeof structuredClone === 'function') {
+        try {
+          return structuredClone(cardMod);
+        } catch (err) {
+          // fall back to JSON cloning below
+        }
+      }
+      try {
+        return JSON.parse(JSON.stringify(cardMod));
+      } catch (err) {
+        return { ...cardMod };
+      }
+    }
+
+    _serializeCardMod(cardMod) {
+      if (!cardMod || typeof cardMod !== 'object') {
+        return '';
+      }
+      if (window.jsyaml && typeof window.jsyaml.dump === 'function') {
+        try {
+          return window.jsyaml.dump(cardMod);
+        } catch (err) {
+          // ignore dump errors and fall back to JSON
+        }
+      }
+      try {
+        return JSON.stringify(cardMod, null, 2);
+      } catch (err) {
+        return '';
+      }
+    }
+
+    _handleCardModChanged(ev) {
+      const raw = ev.detail?.value ?? ev.target?.value ?? '';
+      const value = typeof raw === 'string' ? raw.trim() : '';
+      if (!value) {
+        const newConfig = { ...this._config };
+        delete newConfig.card_mod;
+        this._cardModError = false;
+        this._commitConfig(newConfig);
+        return;
+      }
+
+      let parsed;
+      try {
+        if (window.jsyaml && typeof window.jsyaml.load === 'function') {
+          parsed = window.jsyaml.load(value);
+        } else {
+          parsed = JSON.parse(value);
+        }
+      } catch (err) {
+        this._cardModError = true;
+        this.requestUpdate();
+        return;
+      }
+
+      if (!parsed || typeof parsed !== 'object') {
+        this._cardModError = true;
+        this.requestUpdate();
+        return;
+      }
+
+      this._cardModError = false;
+      const newConfig = { ...this._config, card_mod: parsed };
+      this._commitConfig(newConfig);
     }
 
     _renderEntitiesTab() {
@@ -859,7 +944,28 @@ const registerWaterfallHistoryCardEditor = () => {
               .value=${entity.icon ?? ''}
               @input=${(ev) => this._updateEntityValue(index, 'icon', ev.target.value)}
             ></ha-textfield>
+            <ha-textfield
+              type="number"
+              label="${this._localize('ui.panel.lovelace.editor.card.generic.decimals', 'Digits')}"
+              .value=${entity.digits ?? ''}
+              min="0"
+              max="6"
+              @input=${(ev) => this._updateEntityNumericValue(index, 'digits', ev.target.value)}
+            ></ha-textfield>
+            <ha-textfield
+              label="${this._localize('ui.components.history_graph.options.default_value', 'Default value')}"
+              .value=${entity.default_value ?? ''}
+              @input=${(ev) => this._updateEntityOptionalNumericValue(index, 'default_value', ev.target.value)}
+            ></ha-textfield>
+            <ha-select
+              label="${this._localize('ui.panel.lovelace.editor.card.generic.gradient', 'Use gradient colors')}"
+              .value=${this._triStateValue(entity.gradient)}
+              @value-changed=${(ev) => this._updateEntityTriState(index, 'gradient', ev.detail.value)}
+            >
+              ${this._renderTriStateOptions()}
+            </ha-select>
           </div>
+          ${this._renderEntityThresholdSection(entity, index)}
           <div class="entity-actions">
             <mwc-button class="remove" @click=${() => this._removeEntity(index)}>
               ${this._localize('ui.common.remove')}
@@ -869,8 +975,146 @@ const registerWaterfallHistoryCardEditor = () => {
       `;
     }
 
+    _renderEntityThresholdSection(entity, index) {
+      const mode = this._computeEntityThresholdMode(entity.thresholds);
+      const thresholds = Array.isArray(entity.thresholds) ? entity.thresholds : [];
+      return html`
+        <div class="entity-thresholds">
+          <ha-select
+            label="${this._localize('ui.components.history_graph.options.thresholds', 'Thresholds')}"
+            .value=${mode}
+            @value-changed=${(ev) => this._setEntityThresholdMode(index, ev.detail.value)}
+          >
+            <mwc-list-item value="inherit">${this._localize('ui.common.default', 'Inherit card setting')}</mwc-list-item>
+            <mwc-list-item value="default">${this._localize('ui.common.reset', 'Built-in defaults')}</mwc-list-item>
+            <mwc-list-item value="custom">${this._localize('ui.panel.lovelace.editor.card.generic.custom', 'Custom')}</mwc-list-item>
+          </ha-select>
+          ${mode === 'custom'
+            ? html`
+                ${thresholds.length
+                  ? thresholds.map((threshold, thresholdIndex) =>
+                      this._renderEntityThresholdEditor(index, threshold, thresholdIndex)
+                    )
+                  : html`<p class="hint">${this._localize('ui.components.history_graph.options.no_thresholds', 'Add threshold entries to override the defaults.')}</p>`}
+                <div class="actions">
+                  <mwc-button @click=${() => this._addEntityThreshold(index)}>
+                    ${this._localize('ui.panel.lovelace.editor.card.generic.add_row', 'Add threshold')}
+                  </mwc-button>
+                </div>
+              `
+            : ''}
+        </div>
+      `;
+    }
+
+    _renderEntityThresholdEditor(entityIndex, threshold, thresholdIndex) {
+      return html`
+        <ha-card outlined>
+          <div class="threshold-grid">
+            <ha-textfield
+              type="number"
+              label="${this._localize('ui.panel.lovelace.editor.card.generic.value')}"
+              .value=${threshold.value ?? ''}
+              @input=${(ev) => this._updateEntityThresholdValue(entityIndex, thresholdIndex, 'value', ev.target.value)}
+            ></ha-textfield>
+            <div class="color-picker">
+              <ha-textfield
+                label="${this._localize('ui.panel.lovelace.editor.card.generic.color')}"
+                .value=${threshold.color ?? ''}
+                @input=${(ev) => this._updateEntityThresholdValue(entityIndex, thresholdIndex, 'color', ev.target.value)}
+              ></ha-textfield>
+              <input
+                class="color-input"
+                type="color"
+                .value=${this._normalizeColor(threshold.color)}
+                @input=${(ev) => this._updateEntityThresholdValue(entityIndex, thresholdIndex, 'color', ev.target.value)}
+              />
+            </div>
+          </div>
+          <div class="entity-actions">
+            <mwc-button class="remove" @click=${() => this._removeEntityThreshold(entityIndex, thresholdIndex)}>
+              ${this._localize('ui.common.remove')}
+            </mwc-button>
+          </div>
+        </ha-card>
+      `;
+    }
+
+    _computeEntityThresholdMode(value) {
+      if (Array.isArray(value)) {
+        return 'custom';
+      }
+      if (value === null) {
+        return 'default';
+      }
+      return 'inherit';
+    }
+
+    _setEntityThresholdMode(index, mode) {
+      const entities = [...(this._config.entities || [])];
+      const entity = { ...entities[index] };
+      if (mode === 'inherit') {
+        delete entity.thresholds;
+      } else if (mode === 'default') {
+        entity.thresholds = null;
+      } else if (mode === 'custom') {
+        const existing = Array.isArray(entity.thresholds) ? [...entity.thresholds] : [];
+        entity.thresholds = existing.length
+          ? existing
+          : [{ value: 0, color: '#4FC3F7' }];
+      }
+      entities[index] = entity;
+      this._commitConfig({ ...this._config, entities });
+    }
+
+    _addEntityThreshold(index) {
+      const entities = [...(this._config.entities || [])];
+      const entity = { ...entities[index] };
+      const thresholds = Array.isArray(entity.thresholds) ? [...entity.thresholds] : [];
+      const last = thresholds[thresholds.length - 1];
+      thresholds.push({
+        value: last?.value ?? 0,
+        color: this._normalizeColor(last?.color) ?? '#4FC3F7',
+      });
+      entity.thresholds = thresholds;
+      entities[index] = entity;
+      this._commitConfig({ ...this._config, entities });
+    }
+
+    _removeEntityThreshold(index, thresholdIndex) {
+      const entities = [...(this._config.entities || [])];
+      const entity = { ...entities[index] };
+      const thresholds = Array.isArray(entity.thresholds) ? [...entity.thresholds] : [];
+      thresholds.splice(thresholdIndex, 1);
+      entity.thresholds = thresholds.length ? thresholds : undefined;
+      entities[index] = entity;
+      this._commitConfig({ ...this._config, entities });
+    }
+
+    _updateEntityThresholdValue(index, thresholdIndex, key, value) {
+      const entities = [...(this._config.entities || [])];
+      const entity = { ...entities[index] };
+      const thresholds = Array.isArray(entity.thresholds) ? [...entity.thresholds] : [];
+      const updated = { ...thresholds[thresholdIndex] };
+      if (key === 'value') {
+        const num = Number(value);
+        if (!Number.isNaN(num)) {
+          updated.value = num;
+        }
+      } else if (key === 'color') {
+        updated.color = this._normalizeColor(value);
+      }
+      thresholds[thresholdIndex] = updated;
+      entity.thresholds = thresholds;
+      entities[index] = entity;
+      this._commitConfig({ ...this._config, entities });
+    }
+
     _renderThresholdTab() {
-      const thresholds = this._thresholds;
+      const thresholds = Array.isArray(this._config.thresholds)
+        ? this._config.thresholds
+        : [];
+      const mode = this._globalThresholdMode;
       return html`
         <div class="thresholds">
           <ha-settings-row>
@@ -881,15 +1125,30 @@ const registerWaterfallHistoryCardEditor = () => {
               @change=${(ev) => this._updateConfigValue('gradient', ev.target.checked)}
             ></ha-switch>
           </ha-settings-row>
-          ${Array.isArray(thresholds) && thresholds.length
-            ? thresholds.map((threshold, index) => this._renderThresholdEditor(threshold, index))
+          <ha-settings-row class="threshold-mode-row">
+            <span slot="heading">${this._localize('ui.components.history_graph.options.thresholds', 'Threshold values')}</span>
+            <ha-select
+              slot="content"
+              .value=${mode}
+              @value-changed=${this._handleGlobalThresholdMode}
+            >
+              <mwc-list-item value="default">${this._localize('ui.common.default', 'Built-in defaults')}</mwc-list-item>
+              <mwc-list-item value="custom">${this._localize('ui.panel.lovelace.editor.card.generic.custom', 'Custom')}</mwc-list-item>
+            </ha-select>
+          </ha-settings-row>
+          ${mode === 'custom'
+            ? html`
+                ${thresholds.length
+                  ? thresholds.map((threshold, index) => this._renderThresholdEditor(threshold, index))
+                  : html`<p class="hint">${this._localize('ui.components.history_graph.options.no_thresholds', 'Add threshold entries to override the defaults.')}</p>`}
+                <div class="actions">
+                  <mwc-button @click=${this._addThreshold}>${this._localize('ui.panel.lovelace.editor.card.generic.add_row', 'Add threshold')}</mwc-button>
+                  ${thresholds.length
+                    ? html`<mwc-button @click=${this._clearThresholds}>${this._localize('ui.common.clear', 'Clear')}</mwc-button>`
+                    : ''}
+                </div>
+              `
             : html`<p class="hint">${this._localize('ui.components.history_graph.options.no_thresholds', 'Using built-in defaults.')}</p>`}
-          <div class="actions">
-            <mwc-button @click=${this._addThreshold}>${this._localize('ui.panel.lovelace.editor.card.generic.add_row', 'Add threshold')}</mwc-button>
-            ${Array.isArray(thresholds) && thresholds.length
-              ? html`<mwc-button @click=${this._clearThresholds}>${this._localize('ui.common.clear', 'Clear')}</mwc-button>`
-              : ''}
-          </div>
         </div>
       `;
     }
@@ -1011,6 +1270,15 @@ const registerWaterfallHistoryCardEditor = () => {
       }
     }
 
+    _updateEntityOptionalNumericValue(index, key, value) {
+      if (value === '' || value === undefined) {
+        this._updateEntityValue(index, key, undefined);
+        return;
+      }
+      const num = Number(value);
+      this._updateEntityValue(index, key, Number.isNaN(num) ? value : num);
+    }
+
     _updateEntityTriState(index, key, value) {
       if (value === undefined || value === 'default') {
         this._updateEntityValue(index, key, undefined);
@@ -1019,21 +1287,48 @@ const registerWaterfallHistoryCardEditor = () => {
       this._updateEntityValue(index, key, value === 'true');
     }
 
+    get _globalThresholdMode() {
+      return Array.isArray(this._config.thresholds) ? 'custom' : 'default';
+    }
+
+    _handleGlobalThresholdMode(ev) {
+      const mode = ev.detail?.value ?? ev.target?.value;
+      if (!mode) {
+        return;
+      }
+      if (mode === 'custom') {
+        if (!Array.isArray(this._config.thresholds)) {
+          const thresholds = [{ value: 0, color: '#4FC3F7' }];
+          this._commitConfig({ ...this._config, thresholds });
+        }
+      } else {
+        const newConfig = { ...this._config, thresholds: null };
+        this._commitConfig(newConfig);
+      }
+    }
+
     _addThreshold() {
-      const thresholds = Array.isArray(this._thresholds) ? [...this._thresholds] : [];
-      thresholds.push({ value: thresholds.length ? thresholds[thresholds.length - 1].value : 0, color: '#000000' });
+      const thresholds = Array.isArray(this._config.thresholds) ? [...this._config.thresholds] : [];
+      const last = thresholds[thresholds.length - 1];
+      const lastColor = this._normalizeColor(last?.color ?? '#4FC3F7');
+      thresholds.push({ value: last?.value ?? 0, color: lastColor });
       this._commitConfig({ ...this._config, thresholds });
     }
 
     _removeThreshold(index) {
-      const thresholds = Array.isArray(this._thresholds) ? [...this._thresholds] : [];
+      const thresholds = Array.isArray(this._config.thresholds) ? [...this._config.thresholds] : [];
       thresholds.splice(index, 1);
-      const next = thresholds.length ? thresholds : undefined;
-      this._commitConfig({ ...this._config, thresholds: next });
+      const newConfig = { ...this._config };
+      if (thresholds.length) {
+        newConfig.thresholds = thresholds;
+      } else {
+        newConfig.thresholds = null;
+      }
+      this._commitConfig(newConfig);
     }
 
     _updateThresholdValue(index, key, value) {
-      const thresholds = Array.isArray(this._thresholds) ? [...this._thresholds] : [];
+      const thresholds = Array.isArray(this._config.thresholds) ? [...this._config.thresholds] : [];
       const updated = { ...thresholds[index] };
       if (key === 'value') {
         const num = Number(value);
@@ -1048,8 +1343,7 @@ const registerWaterfallHistoryCardEditor = () => {
     }
 
     _clearThresholds() {
-      const newConfig = { ...this._config };
-      delete newConfig.thresholds;
+      const newConfig = { ...this._config, thresholds: null };
       this._commitConfig(newConfig);
     }
 
@@ -1068,7 +1362,7 @@ const registerWaterfallHistoryCardEditor = () => {
           return `#${cleaned}`;
         }
       }
-      return '#000000';
+      return '#4FC3F7';
     }
 
     _commitConfig(config) {
@@ -1118,11 +1412,33 @@ const registerWaterfallHistoryCardEditor = () => {
           flex-direction: column;
           gap: 16px;
         }
+        .card-mod-row {
+          align-items: flex-start;
+        }
+        .card-mod-editor {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+          width: 100%;
+        }
+        .card-mod-editor ha-yaml-editor {
+          width: 100%;
+        }
+        .card-mod-editor .error {
+          color: var(--error-color);
+          margin: 0;
+        }
         .entity-grid {
           display: grid;
           grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
           gap: 16px;
           padding: 16px;
+        }
+        .entity-thresholds {
+          display: flex;
+          flex-direction: column;
+          gap: 16px;
+          padding: 0 16px 16px;
         }
         .threshold-grid {
           display: grid;
@@ -1151,9 +1467,19 @@ const registerWaterfallHistoryCardEditor = () => {
           gap: 8px;
           padding: 0 16px 16px;
         }
+        .entity-thresholds .actions {
+          justify-content: flex-start;
+          padding: 0;
+        }
         .hint {
           margin: 0;
           color: var(--secondary-text-color);
+        }
+        .entity-thresholds .hint {
+          margin: 0;
+        }
+        .threshold-mode-row {
+          align-items: center;
         }
         mwc-button.remove {
           --mdc-theme-primary: var(--error-color);
