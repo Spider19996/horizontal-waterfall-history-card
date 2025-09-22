@@ -647,6 +647,7 @@ class waterfallHistoryCard extends HTMLElement {
     const startTime = Date.now() - (hours * 60 * 60 * 1000);
 
     let hasHistoryValues = false;
+    let earliestHistoryIndex = null;
     const historyList = Array.isArray(historyData) ? historyData : [];
     historyList.forEach(point => {
       const pointTime = new Date(point.last_changed || point.last_updated).getTime();
@@ -656,6 +657,9 @@ class waterfallHistoryCard extends HTMLElement {
         if (bucketIndex >= 0 && bucketIndex < intervals) {
           processed[bucketIndex] = this.parseState(point.state);
           hasHistoryValues = true;
+          if (earliestHistoryIndex === null || bucketIndex < earliestHistoryIndex) {
+            earliestHistoryIndex = bucketIndex;
+          }
         }
       }
     });
@@ -671,10 +675,19 @@ class waterfallHistoryCard extends HTMLElement {
       }
     }
 
+    if (earliestHistoryIndex !== null) {
+      for (let i = 0; i < earliestHistoryIndex; i++) {
+        processed[i] = 'unavailable';
+      }
+    } else {
+      processed.fill('unavailable');
+    }
+
     const fallbackValue = this.parseState(currentState);
     const hasConfiguredDefault = hasEntityDefault || hasGlobalDefault;
     const hasMeaningfulData = processed.some(value => value !== resolvedDefault);
-    if (!hasHistoryValues && !hasMeaningfulData && !hasConfiguredDefault && fallbackValue !== null && fallbackValue !== undefined) {
+    const hasAnyHistory = earliestHistoryIndex !== null;
+    if (hasAnyHistory && !hasHistoryValues && !hasMeaningfulData && !hasConfiguredDefault && fallbackValue !== null && fallbackValue !== undefined) {
       processed.fill(fallbackValue);
     }
 
