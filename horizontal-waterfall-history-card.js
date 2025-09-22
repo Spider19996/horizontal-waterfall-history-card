@@ -32,6 +32,7 @@ class waterfallHistoryCard extends HTMLElement {
     this._historyRefreshTimer = null;
     this._historyRefreshTimerInterval = null;
     this._isUpdatingCard = false;
+    this._segmentResizeObserver = null;
 
     this.translations = {
       en: {
@@ -97,6 +98,10 @@ class waterfallHistoryCard extends HTMLElement {
 
   disconnectedCallback() {
     this._stopHistoryRefreshTimer();
+    if (this._segmentResizeObserver) {
+      this._segmentResizeObserver.disconnect();
+      this._segmentResizeObserver = null;
+    }
   }
 
   setConfig(config) {
@@ -361,18 +366,17 @@ class waterfallHistoryCard extends HTMLElement {
           overflow: hidden;
           display: flex;
           align-items: center;
-          gap: var(--segment-gap, 0px);
         }
         .bar-segment {
-          flex: 1;
           height: 100%;
           transition: all 0.3s ease;
           position: relative;
           background-color: transparent;
-          border-right: var(--segment-divider-width, 0px) solid rgba(255,255,255,0.2);
+          margin-inline-end: var(--segment-gap, 0px);
+          flex: 0 0 auto;
         }
         .bar-segment:last-child {
-          border-right: none;
+          margin-inline-end: 0;
         }
         .bar-segment::after {
           content: '';
@@ -454,7 +458,7 @@ class waterfallHistoryCard extends HTMLElement {
           `--segment-height: ${segmentAppearance.height}`,
           `--segment-radius: ${segmentAppearance.radius}`,
           `--segment-aspect: ${segmentAppearance.aspectRatio}`,
-          `--segment-divider-width: ${segmentAppearance.dividerWidth}`,
+          `--segment-count: ${history.length}`,
         ].join('; ');
 
         const showLabels = entityConfig.show_labels ?? this.config.show_labels;
@@ -527,6 +531,79 @@ class waterfallHistoryCard extends HTMLElement {
           ev.stopPropagation();
           this.openMoreInfo(id);
         }
+      });
+    });
+
+    this._setupSegmentResizeObservers();
+    this._applySegmentSizing();
+  }
+
+  _setupSegmentResizeObservers() {
+    if (!this.shadowRoot) {
+      return;
+    }
+
+    if (typeof ResizeObserver === 'undefined') {
+      this._segmentResizeObserver = null;
+      return;
+    }
+
+    if (!this._segmentResizeObserver) {
+      this._segmentResizeObserver = new ResizeObserver(() => {
+        this._applySegmentSizing();
+      });
+    } else {
+      this._segmentResizeObserver.disconnect();
+    }
+
+    const containers = this.shadowRoot.querySelectorAll('.waterfall-container');
+    containers.forEach((container) => {
+      this._segmentResizeObserver.observe(container);
+    });
+  }
+
+  _applySegmentSizing() {
+    if (!this.shadowRoot) {
+      return;
+    }
+
+    const containers = this.shadowRoot.querySelectorAll('.waterfall-container');
+    containers.forEach((container) => {
+      const segments = container.querySelectorAll('.bar-segment');
+      const segmentCount = segments.length;
+      if (segmentCount === 0) {
+        return;
+      }
+
+      const gapValue = container.style.getPropertyValue('--segment-gap');
+      let gap = Number.parseFloat(gapValue);
+      if (!Number.isFinite(gap)) {
+        const computedGap = getComputedStyle(container).getPropertyValue('--segment-gap');
+        gap = Number.parseFloat(computedGap);
+      }
+      if (!Number.isFinite(gap) || gap < 0) {
+        gap = 0;
+      }
+
+      const containerWidth = container.clientWidth;
+      if (containerWidth <= 0) {
+        return;
+      }
+
+      const totalGap = gap * Math.max(0, segmentCount - 1);
+      const availableWidth = containerWidth - totalGap;
+      if (availableWidth <= 0) {
+        segments.forEach((segment, index) => {
+          segment.style.width = '0px';
+          segment.style.marginInlineEnd = index === segmentCount - 1 ? '0px' : `${gap}px`;
+        });
+        return;
+      }
+
+      const widthPerSegment = availableWidth / segmentCount;
+      segments.forEach((segment, index) => {
+        segment.style.width = `${widthPerSegment}px`;
+        segment.style.marginInlineEnd = index === segmentCount - 1 ? '0px' : `${gap}px`;
       });
     });
   }
@@ -632,7 +709,6 @@ class waterfallHistoryCard extends HTMLElement {
       height: appearance.height,
       radius: appearance.radius,
       aspectRatio: appearance.aspectRatio ?? 'auto',
-      dividerWidth: '0px',
     };
   }
 
