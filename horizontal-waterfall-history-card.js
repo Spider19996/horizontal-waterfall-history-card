@@ -1227,6 +1227,11 @@ class WaterfallHistoryCardEditor extends HTMLElement {
           data-field="segment_spacing"
           value="${segmentSpacingValue}"
         ></ha-textfield>
+        <ha-textfield
+          label="Farbe für 'Nicht verfügbar' (#RRGGBB)"
+          data-field="unavailable_color"
+          value="${this._config.unavailable_color ?? ''}"
+        ></ha-textfield>
       </div>
       <div class="thresholds-section">
         <h3>Schwellenwerte</h3>
@@ -1428,6 +1433,12 @@ class WaterfallHistoryCardEditor extends HTMLElement {
                     data-field="segment_spacing"
                     data-entity-index="${index}"
                     value="${segmentSpacing}"
+                  ></ha-textfield>
+                  <ha-textfield
+                    label="Farbe für 'Nicht verfügbar' (#RRGGBB)"
+                    data-field="unavailable_color"
+                    data-entity-index="${index}"
+                    value="${entity.unavailable_color ?? ''}"
                   ></ha-textfield>
                 </div>
               </div>
@@ -1764,6 +1775,10 @@ class WaterfallHistoryCardEditor extends HTMLElement {
       const entities = [...this._entities];
       const updated = { ...entities[index] };
 
+      if (field === 'unavailable_color' && typeof value === 'string') {
+        value = value.trim();
+      }
+
       if (target.localName === 'ha-select') {
         if (value === 'inherit') {
           delete updated[field];
@@ -1782,6 +1797,10 @@ class WaterfallHistoryCardEditor extends HTMLElement {
       this._config = { ...this._config, entities };
     } else {
       const updatedConfig = { ...this._config };
+
+      if (field === 'unavailable_color' && typeof value === 'string') {
+        value = value.trim();
+      }
 
       if (target.localName === 'ha-switch') {
         updatedConfig[field] = value;
