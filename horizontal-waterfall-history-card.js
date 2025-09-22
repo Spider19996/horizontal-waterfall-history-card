@@ -618,6 +618,7 @@ class WaterfallHistoryCardEditor extends HTMLElement {
     this._selectedTab = 0;
     this._shouldFocusSelectedTab = false;
     this._hasRendered = false;
+    this._lastConfigString = null;
   }
 
   set hass(hass) {
@@ -636,27 +637,77 @@ class WaterfallHistoryCardEditor extends HTMLElement {
   }
 
   setConfig(config) {
-    const entities = Array.isArray(config?.entities)
-      ? config.entities.map((entity) => (typeof entity === 'string' ? { entity } : { ...entity }))
-      : [];
+    const normalized = this._normalizeConfig(config);
+    const normalizedString = this._stringifyConfig(normalized);
 
-    const thresholds = Array.isArray(config?.thresholds)
-      ? config.thresholds.map((threshold) => ({ ...threshold }))
-      : config?.thresholds === null
-        ? null
-        : threshold_default_number.map((threshold) => ({ ...threshold }));
+    if (this._lastConfigString && this._lastConfigString === normalizedString) {
+      this._config = normalized;
+      this._lastConfigString = normalizedString;
+      return;
+    }
 
-    this._config = {
-      ...config,
-      thresholds,
-      entities,
-    };
+    this._config = normalized;
+    this._lastConfigString = normalizedString;
 
     if (this._selectedTab > 2) {
       this._selectedTab = 0;
     }
 
     this.render();
+  }
+
+  _normalizeConfig(config) {
+    const base = typeof config === 'object' && config !== null ? config : {};
+
+    const entities = Array.isArray(base.entities)
+      ? base.entities.map((entity) => (typeof entity === 'string' ? { entity } : { ...entity }))
+      : [];
+
+    const thresholds = Array.isArray(base.thresholds)
+      ? base.thresholds.map((threshold) => ({ ...threshold }))
+      : base.thresholds === null
+        ? null
+        : threshold_default_number.map((threshold) => ({ ...threshold }));
+
+    const normalized = {
+      ...base,
+      entities,
+      thresholds,
+    };
+
+    if (thresholds === null) {
+      normalized.thresholds = null;
+    }
+
+    return normalized;
+  }
+
+  _stringifyConfig(value) {
+    if (value === undefined) {
+      return '';
+    }
+    return JSON.stringify(this._sortObjectForHash(value));
+  }
+
+  _sortObjectForHash(value) {
+    if (Array.isArray(value)) {
+      return value.map((item) => this._sortObjectForHash(item));
+    }
+
+    if (value && typeof value === 'object') {
+      const sorted = {};
+      Object.keys(value)
+        .sort()
+        .forEach((key) => {
+          const child = value[key];
+          if (child !== undefined) {
+            sorted[key] = this._sortObjectForHash(child);
+          }
+        });
+      return sorted;
+    }
+
+    return value;
   }
 
   get _entities() {
@@ -1382,6 +1433,8 @@ class WaterfallHistoryCardEditor extends HTMLElement {
       ...this._config,
       entities: cleanedEntities,
     };
+
+    this._lastConfigString = this._stringifyConfig(config);
 
     this.dispatchEvent(
       new CustomEvent('config-changed', {
