@@ -605,6 +605,7 @@ class waterfallHistoryCard extends HTMLElement {
     const spacingValue = entityConfig.segment_spacing ?? this.config.segment_spacing ?? 0;
     const parsedSpacing = Number(spacingValue);
     const gap = Number.isFinite(parsedSpacing) ? Math.max(0, parsedSpacing) : 0;
+    const isZeroGap = gap === 0;
 
     const defaults = {
       bar: { width: '100%', height: '100%', radius: '2px', aspectRatio: 'auto' },
@@ -615,7 +616,7 @@ class waterfallHistoryCard extends HTMLElement {
         aspectRatio: 'auto',
       },
       dot: {
-        width: '55%',
+        width: isZeroGap ? '100%' : '55%',
         height: 'auto',
         radius: '9999px',
         aspectRatio: '1 / 1',
