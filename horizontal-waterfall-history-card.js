@@ -45,6 +45,8 @@ class waterfallHistoryCard extends HTMLElement {
         now: 'Now',
         uptime_label: 'Uptime',
         uptime_unavailable: 'No data',
+        state_unavailable: 'Unavailable',
+        state_unknown: 'Unknown',
         language_label: 'Language',
         language_auto: 'Auto',
         language_en: 'English',
@@ -61,6 +63,8 @@ class waterfallHistoryCard extends HTMLElement {
         now: 'Jetzt',
         uptime_label: 'Verfügbarkeit',
         uptime_unavailable: 'Keine Daten',
+        state_unavailable: 'Nicht verfügbar',
+        state_unknown: 'Unbekannt',
         language_label: 'Sprache',
         language_auto: 'Auto',
         language_en: 'Englisch',
@@ -77,6 +81,8 @@ class waterfallHistoryCard extends HTMLElement {
         now: 'Actuel',
         uptime_label: 'Disponibilité',
         uptime_unavailable: 'Pas de données',
+        state_unavailable: 'Indisponible',
+        state_unknown: 'Inconnu',
         language_label: 'Langue',
         language_auto: 'Auto',
         language_en: 'Anglais',
@@ -172,6 +178,7 @@ class waterfallHistoryCard extends HTMLElement {
         compact: config.compact === true,
         default_value: config.default_value ?? null,
         digits: parseNumber(config.digits, 1),
+        unavailable_color: config.unavailable_color ?? '#A0A0A0',
         card_mod: config.card_mod || {},
         language: normalizedLanguage,
         segment_style: segmentOptions.segment_style,
@@ -715,17 +722,38 @@ class waterfallHistoryCard extends HTMLElement {
   parseState(state) {
     if (typeof state === 'number') return state;
     if (typeof state === 'string') {
-      if (state.toLowerCase() === 'off') return 0;
-      if (state.toLowerCase() === 'on') return 1;
+      const normalized = state.trim().toLowerCase();
+      if (normalized === 'off') return 0;
+      if (normalized === 'on') return 1;
+      if (this.isUnavailableState(state)) return state;
       const casted = parseFloat(state);
       if (!Number.isNaN(casted)) return casted;
     }
     return null;
   }
 
+  isUnavailableState(value) {
+      if (typeof value !== 'string') {
+          return false;
+      }
+      const normalized = value.trim().toLowerCase();
+      return normalized === 'unavailable' || normalized === 'unknown';
+  }
+
   displayState(state, entityConfig) {
-      if (state === true || state === 1 && (entityConfig.thresholds === threshold_default_boolean || this.config.thresholds === threshold_default_boolean)) return 'on';
-      if (state === false || state === 0 && (entityConfig.thresholds === threshold_default_boolean || this.config.thresholds === threshold_default_boolean)) return 'off';
+      if (typeof state === 'string') {
+          const normalized = state.trim().toLowerCase();
+          if (normalized === 'unavailable') {
+              return this.t('state_unavailable');
+          }
+          if (normalized === 'unknown') {
+              return this.t('state_unknown');
+          }
+          return `${state}${this.getUnit(entityConfig)}`;
+      }
+      const useBooleanThresholds = entityConfig.thresholds === threshold_default_boolean || this.config.thresholds === threshold_default_boolean;
+      if ((state === true || state === 1) && useBooleanThresholds) return 'on';
+      if ((state === false || state === 0) && useBooleanThresholds) return 'off';
       if (typeof state === 'number') {
           const digits = entityConfig.digits ?? this.config.digits;
           return state.toFixed(digits) + this.getUnit(entityConfig);
@@ -746,7 +774,7 @@ class waterfallHistoryCard extends HTMLElement {
     const domain = typeof entityId === 'string' ? entityId.split('.')[0] : '';
     const booleanDomains = new Set(['binary_sensor', 'switch', 'lock', 'cover', 'fan', 'humidifier']);
 
-    const validValues = values.filter((value) => value !== null && value !== undefined);
+    const validValues = values.filter((value) => value !== null && value !== undefined && !this.isUnavailableState(value));
     if (validValues.length === 0) {
       return null;
     }
@@ -770,7 +798,11 @@ class waterfallHistoryCard extends HTMLElement {
   }
 
   getColorForValue(value, entityConfig) {
-    if (value === null || isNaN(value)) return '#666666';
+    const unavailableColor = entityConfig.unavailable_color ?? this.config.unavailable_color ?? '#A0A0A0';
+    if (this.isUnavailableState(value)) {
+        return unavailableColor;
+    }
+    if (value === null || value === undefined || isNaN(value)) return '#666666';
 
     let thresholds = entityConfig.thresholds ?? this.config.thresholds;
     if (!thresholds) {

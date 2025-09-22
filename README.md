@@ -12,6 +12,7 @@
 - **Entity icons** — show icons next to entity names; toggle globally or per-entity.
 - **Compact mode** — shrink fonts and spacing for tighter dashboards.
 - **Per-entity overrides** — customize hours, intervals, labels, icons, and display options per entity.
+- **Unavailable handling** — display localized labels and a configurable color for `unavailable`/`unknown` states.
 
 
 <img width="476" height="380" alt="Sample card data" src="https://github.com/user-attachments/assets/8bcc7253-d042-43e2-8d68-30bf7b667b91" />
@@ -66,6 +67,7 @@ entities:
 | `show_current`| `boolean` | `true`  | Show the current value next to the entity name.                             |
 | `show_icons`  | `boolean` | `true`  | Show entity icons globally. Can be overridden per entity.                   |
 | `compact`     | `boolean` | `false` | Use smaller font sizes and spacing.                                         |
+| `unavailable_color` | `string` | `"#A0A0A0"` | Color used when an entity reports `unavailable`/`unknown`.            |
 | `language`    | `string`  | `"auto"` | Language for built-in labels. Supports `auto`, `en`, `de`, `fr` (and synonyms such as `english`, `deutsch`, etc.). |
 
 ---
@@ -86,6 +88,7 @@ Each item in `entities:` can be either a bare entity ID string, or an object wit
 | `show_icons`   | `boolean` | Inherits from card  | Show/hide the icon for just this entity (overrides global setting). |
 | `segment_style`| `string`  | Inherits from card  | Override the segment shape (`bar`, `line`, `dot`).                  |
 | `segment_spacing`| `number`| Inherits from card  | Override the gap between segments for this entity.                  |
+| `unavailable_color` | `string` | Inherits from card | Override the color used for `unavailable`/`unknown` states.          |
 
 ---
 ### Example
@@ -104,6 +107,8 @@ entities:
 ```
 
 To force the card to German regardless of the Home Assistant UI language, set `language: deutsch` (synonyms such as `german` or the short code `de` work as well). The default `auto` follows the UI language when available.
+
+When an entity reports the `unavailable` or `unknown` state, the card now keeps the textual status (with localization) and colors the corresponding segment using `unavailable_color`. You can override this color per entity by adding `unavailable_color: '#FF3366'` (for example) inside that entity's configuration.
 
 ### Segment styles
 
