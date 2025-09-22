@@ -625,6 +625,7 @@ class WaterfallHistoryCardEditor extends HTMLElement {
     this._hasRendered = false;
     this._lastConfigString = null;
     this._waitingForEntityPicker = false;
+    this._waitingForIconPicker = false;
   }
 
   set hass(hass) {
@@ -637,6 +638,12 @@ class WaterfallHistoryCardEditor extends HTMLElement {
 
     this.shadowRoot
       ?.querySelectorAll('ha-entity-picker[data-field="entity"]')
+      .forEach((picker) => {
+        picker.hass = hass;
+      });
+
+    this.shadowRoot
+      ?.querySelectorAll('ha-icon-picker[data-field]')
       .forEach((picker) => {
         picker.hass = hass;
       });
@@ -875,6 +882,17 @@ class WaterfallHistoryCardEditor extends HTMLElement {
       });
     }
 
+    const supportsIconPicker = customElements.get('ha-icon-picker') !== undefined;
+    if (!supportsIconPicker && !this._waitingForIconPicker) {
+      this._waitingForIconPicker = true;
+      customElements.whenDefined('ha-icon-picker').then(() => {
+        this._waitingForIconPicker = false;
+        if (this.isConnected) {
+          this.render();
+        }
+      });
+    }
+
     const entitiesTab = `
       <div class="entities">
         ${this._entities
@@ -921,12 +939,24 @@ class WaterfallHistoryCardEditor extends HTMLElement {
                     data-entity-index="${index}"
                     value="${entity.name ?? ''}"
                   ></ha-textfield>
-                  <ha-textfield
-                    label="Icon (z. B. mdi:thermometer)"
-                    data-field="icon"
-                    data-entity-index="${index}"
-                    value="${entity.icon ?? ''}"
-                  ></ha-textfield>
+                  ${supportsIconPicker
+                    ? `
+                        <ha-icon-picker
+                          label="Icon"
+                          data-field="icon"
+                          data-entity-index="${index}"
+                          value="${entity.icon ?? ''}"
+                          allow-custom-icon
+                        ></ha-icon-picker>
+                      `
+                    : `
+                        <ha-textfield
+                          label="Icon (z. B. mdi:thermometer)"
+                          data-field="icon"
+                          data-entity-index="${index}"
+                          value="${entity.icon ?? ''}"
+                        ></ha-textfield>
+                      `}
                   <ha-textfield
                     label="Stunden"
                     type="number"
@@ -1233,6 +1263,16 @@ class WaterfallHistoryCardEditor extends HTMLElement {
       picker.addEventListener('value-changed', (ev) => this._entityPickerChanged(ev));
     });
 
+    this.shadowRoot.querySelectorAll('ha-icon-picker[data-field]').forEach((picker) => {
+      if (this._hass) {
+        picker.hass = this._hass;
+      }
+      if (picker.hasAttribute('value')) {
+        picker.value = picker.getAttribute('value');
+      }
+      picker.addEventListener('value-changed', (ev) => this._valueChanged(ev));
+    });
+
     const addButton = this.shadowRoot.querySelector('.add-entity');
     if (addButton) {
       addButton.addEventListener('click', () => this._addEntity());
@@ -1294,6 +1334,8 @@ class WaterfallHistoryCardEditor extends HTMLElement {
       if (value === undefined && ev.detail && 'value' in ev.detail) {
         value = ev.detail.value;
       }
+    } else if (ev.detail && 'value' in ev.detail) {
+      value = ev.detail.value;
     } else if (target.type === 'number') {
       value = target.value === '' ? undefined : Number(target.value);
     } else {
