@@ -103,6 +103,34 @@ class waterfallHistoryCard extends HTMLElement {
         return Number.isFinite(num) ? num : fallback;
     };
 
+    const normalizeSegmentOptions = (source, includeDefaults = false) => {
+        const options = {};
+        if (!source || typeof source !== 'object') {
+            if (includeDefaults) {
+                options.segment_style = 'bar';
+                options.segment_spacing = 0;
+            }
+            return options;
+        }
+
+        if (typeof source.segment_style === 'string') {
+            options.segment_style = source.segment_style.toString().trim().toLowerCase();
+        } else if (includeDefaults) {
+            options.segment_style = 'bar';
+        }
+
+        const spacingValue = parseNumber(source.segment_spacing, includeDefaults ? 0 : undefined);
+        if (spacingValue !== undefined && spacingValue !== null && Number.isFinite(spacingValue)) {
+            options.segment_spacing = Math.max(0, spacingValue);
+        } else if (includeDefaults) {
+            options.segment_spacing = 0;
+        }
+
+        return options;
+    };
+
+    const segmentOptions = normalizeSegmentOptions(config, true);
+
     const globalConfig = {
         title: config.title || (this.translations[this.language]?.history ?? this.translations.en.history),
         hours: parseNumber(config.hours, 24),
@@ -123,6 +151,8 @@ class waterfallHistoryCard extends HTMLElement {
         digits: parseNumber(config.digits, 1),
         card_mod: config.card_mod || {},
         language: normalizedLanguage,
+        segment_style: segmentOptions.segment_style,
+        segment_spacing: segmentOptions.segment_spacing,
     };
 
     this.config = {
@@ -131,7 +161,9 @@ class waterfallHistoryCard extends HTMLElement {
             if (typeof entityConfig === 'string') {
                 return { entity: entityConfig };
             }
-            return { ...entityConfig };
+            const normalizedEntity = { ...entityConfig };
+            const perEntitySegments = normalizeSegmentOptions(entityConfig, false);
+            return { ...normalizedEntity, ...perEntitySegments };
         }),
     };
   }
@@ -178,7 +210,14 @@ class waterfallHistoryCard extends HTMLElement {
 
       const lastBar = this.shadowRoot.querySelector(`.bar-segment[data-entity="${entityId}"].last-bar`);
       if (lastBar && current != null) {
-        lastBar.style.backgroundColor = this.getColorForValue(current, entityConfig);
+        const color = this.getColorForValue(current, entityConfig);
+        const appearance = this.resolveSegmentAppearance(entityConfig);
+        lastBar.style.setProperty('--segment-color', color);
+        if (appearance.type === 'bar') {
+          lastBar.style.backgroundColor = color;
+        } else {
+          lastBar.style.backgroundColor = 'transparent';
+        }
         lastBar.setAttribute('title', `${this.displayState(current, entityConfig)} - ${this.t('now')}`);
       }
     });
@@ -293,15 +332,31 @@ class waterfallHistoryCard extends HTMLElement {
           border-radius: 2px;
           overflow: hidden;
           display: flex;
+          align-items: center;
+          gap: var(--segment-gap, 0px);
         }
         .bar-segment {
           flex: 1;
           height: 100%;
           transition: all 0.3s ease;
-          border-right: 1px solid rgba(255,255,255,0.2);
+          position: relative;
+          background-color: transparent;
+          border-right: var(--segment-divider-width, 0px) solid rgba(255,255,255,0.2);
         }
         .bar-segment:last-child {
           border-right: none;
+        }
+        .bar-segment::after {
+          content: '';
+          position: absolute;
+          top: 50%;
+          left: 50%;
+          transform: translate(-50%, -50%);
+          width: var(--segment-width, 100%);
+          height: var(--segment-height, 100%);
+          border-radius: var(--segment-radius, 2px);
+          background-color: var(--segment-color, transparent);
+          transition: inherit;
         }
         .labels {
           display: flex;
@@ -346,18 +401,26 @@ class waterfallHistoryCard extends HTMLElement {
         const globalShowIcons = (this && this.config && this.config.show_icons !== undefined) ? this.config.show_icons : true;
         const perEntityShowIcons = (entityConfig.show_icons !== undefined) ? entityConfig.show_icons : globalShowIcons;
         const iconHtml = (perEntityShowIcons && icon) ? `<ha-icon class="entity-icon" icon="${icon}"></ha-icon>` : '';
-const history = [...(processedHistories[entityId] || [])];
+        const history = [...(processedHistories[entityId] || [])];
         const current = this.parseState(entity.state);
         history.push(current);
-        
+
         const [actualMin, actualMax] = this.getMinMax(history);
-        
+        const segmentAppearance = this.resolveSegmentAppearance(entityConfig);
+        const containerStyles = [
+          `--segment-gap: ${segmentAppearance.spacing}`,
+          `--segment-width: ${segmentAppearance.width}`,
+          `--segment-height: ${segmentAppearance.height}`,
+          `--segment-radius: ${segmentAppearance.radius}`,
+          `--segment-divider-width: ${segmentAppearance.dividerWidth}`,
+        ].join('; ');
+
         const showLabels = entityConfig.show_labels ?? this.config.show_labels;
         const showMinMax = entityConfig.show_min_max ?? this.config.show_min_max;
         const showCurrent = entityConfig.show_current ?? this.config.show_current;
         const hours = entityConfig.hours ?? this.config.hours;
         const intervals = entityConfig.intervals ?? this.config.intervals;
-        
+
         return `
           <div class="entity-container" data-entity-id="${entityId}" >
             <div class="entity-header">
@@ -365,13 +428,14 @@ const history = [...(processedHistories[entityId] || [])];
               <span class="entity-name">${name}</span>
               ${showCurrent ? `<span class="current-value" data-entity="${entityId}">${this.displayState(current, entityConfig)}</span>` : ''}
             </div>
-            <div class="waterfall-container">
+            <div class="waterfall-container" style="${containerStyles}">
               ${history.map((value, index) => {
                 const isLast = index === history.length - 1;
                 const color = this.getColorForValue(value, entityConfig);
+                const segmentColorStyle = `--segment-color: ${color};${segmentAppearance.type === 'bar' ? ` background-color: ${color};` : ''}`;
                 return `<div class="bar-segment ${isLast ? 'last-bar' : ''}"
                              data-entity="${entityId}"
-                             style="background-color: ${color};"
+                             style="${segmentColorStyle}"
                              title="${this.getTimeLabel(index, intervals, hours)} : ${value !== null ? this.displayState(value, entityConfig) : this.t('error_loading_data')}">
                         </div>`;
               }).join('')}
@@ -481,6 +545,35 @@ const history = [...(processedHistories[entityId] || [])];
         if (d < min) min = d;
     });
     return [min, max];
+  }
+
+  resolveSegmentAppearance(entityConfig) {
+    const styleCandidate = (entityConfig.segment_style ?? this.config.segment_style ?? 'bar');
+    const styleString = typeof styleCandidate === 'string' ? styleCandidate.toString().trim().toLowerCase() : 'bar';
+    const validStyles = ['bar', 'line', 'dot'];
+    const type = validStyles.includes(styleString) ? styleString : 'bar';
+
+    const spacingValue = entityConfig.segment_spacing ?? this.config.segment_spacing ?? 0;
+    const parsedSpacing = Number(spacingValue);
+    const gap = Number.isFinite(parsedSpacing) ? Math.max(0, parsedSpacing) : 0;
+
+    const defaults = {
+      bar: { width: '100%', height: '100%', radius: '2px' },
+      line: { width: '35%', height: '100%', radius: '2px' },
+      dot: { width: '55%', height: '55%', radius: '9999px' },
+    };
+
+    const appearance = defaults[type] || defaults.bar;
+    const dividerWidth = (type === 'bar' && gap === 0) ? '1px' : '0px';
+
+    return {
+      type,
+      spacing: `${gap}px`,
+      width: appearance.width,
+      height: appearance.height,
+      radius: appearance.radius,
+      dividerWidth,
+    };
   }
 
   parseState(state) {
