@@ -85,8 +85,6 @@ class waterfallHistoryCard extends HTMLElement {
   setConfig(config) {
     // FIX: ensure config object exists before accessing properties
     this.config = this.config || {};
-    // FIX: add show_icons option (default true)
-    this.config.show_icons = (config.show_icons !== false);
     this._hasCustomTitle = !!config.title;
 
     const normalizedLanguage = this.normalizeLanguageOption(config.language ?? 'auto');
@@ -97,23 +95,32 @@ class waterfallHistoryCard extends HTMLElement {
       throw new Error('Please define a list of entities.');
     }
 
+    const parseNumber = (value, fallback) => {
+        if (value === undefined || value === null || value === '') {
+            return fallback;
+        }
+        const num = Number(value);
+        return Number.isFinite(num) ? num : fallback;
+    };
+
     const globalConfig = {
         title: config.title || (this.translations[this.language]?.history ?? this.translations.en.history),
-        hours: config.hours || 24,
-        intervals: config.intervals || 48,
-        height: config.height || 60,
-        min_value: config.min_value || null,
-        max_value: config.max_value || null,
-        thresholds: config.thresholds || null,
-        gradient: config.gradient || false,
+        hours: parseNumber(config.hours, 24),
+        intervals: parseNumber(config.intervals, 48),
+        height: parseNumber(config.height, 60),
+        min_value: config.min_value ?? null,
+        max_value: config.max_value ?? null,
+        thresholds: config.thresholds ?? null,
+        gradient: config.gradient === true,
         show_current: config.show_current !== false,
         show_labels: config.show_labels !== false,
-        show_min_max: config.show_min_max || false,
+        show_min_max: config.show_min_max !== false,
+        show_icons: config.show_icons !== false,
         unit: config.unit || null,
         icon: config.icon || null,
-        compact: config.compact || false,
+        compact: config.compact === true,
         default_value: config.default_value ?? null,
-        digits: typeof config.digits === 'number' ? config.digits : 1,
+        digits: parseNumber(config.digits, 1),
         card_mod: config.card_mod || {},
         language: normalizedLanguage,
     };
@@ -124,7 +131,7 @@ class waterfallHistoryCard extends HTMLElement {
             if (typeof entityConfig === 'string') {
                 return { entity: entityConfig };
             }
-            return entityConfig;
+            return { ...entityConfig };
         }),
     };
   }
@@ -593,9 +600,562 @@ const history = [...(processedHistories[entityId] || [])];
       ],
     };
   }
+
+  static async getConfigElement() {
+    return document.createElement('waterfall-history-card-editor');
+  }
 }
 
-customElements.define('waterfall-history-card', waterfallHistoryCard);
+if (!customElements.get('waterfall-history-card')) {
+  customElements.define('waterfall-history-card', waterfallHistoryCard);
+}
+
+class WaterfallHistoryCardEditor extends HTMLElement {
+  constructor() {
+    super();
+    this.attachShadow({ mode: 'open' });
+    this._config = { entities: [] };
+    this._selectedTab = 0;
+    this._shouldFocusSelectedTab = false;
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    this.render();
+  }
+
+  setConfig(config) {
+    const entities = Array.isArray(config?.entities)
+      ? config.entities.map((entity) => (typeof entity === 'string' ? { entity } : { ...entity }))
+      : [];
+
+    this._config = {
+      ...config,
+      entities,
+    };
+
+    if (this._selectedTab > 2) {
+      this._selectedTab = 0;
+    }
+
+    this.render();
+  }
+
+  get _entities() {
+    return this._config.entities || [];
+  }
+
+  render() {
+    if (!this.shadowRoot) return;
+
+    const tabs = ['Allgemein', 'Darstellung', 'Entitäten'];
+    const languageValue = this._config.language ?? 'auto';
+
+    const generalTab = `
+      <div class="form-grid">
+        <ha-textfield
+          label="Titel"
+          data-field="title"
+          value="${this._config.title ?? ''}"
+        ></ha-textfield>
+        <ha-textfield
+          label="Stunden"
+          type="number"
+          min="1"
+          step="1"
+          data-field="hours"
+          value="${this._config.hours ?? ''}"
+        ></ha-textfield>
+        <ha-textfield
+          label="Intervalle"
+          type="number"
+          min="1"
+          step="1"
+          data-field="intervals"
+          value="${this._config.intervals ?? ''}"
+        ></ha-textfield>
+        <ha-textfield
+          label="Höhe (px)"
+          type="number"
+          min="10"
+          step="1"
+          data-field="height"
+          value="${this._config.height ?? ''}"
+        ></ha-textfield>
+        <ha-select
+          label="Sprache"
+          data-field="language"
+          data-value="${languageValue}"
+        >
+          <mwc-list-item value="auto">Automatisch</mwc-list-item>
+          <mwc-list-item value="en">English</mwc-list-item>
+          <mwc-list-item value="de">Deutsch</mwc-list-item>
+          <mwc-list-item value="fr">Français</mwc-list-item>
+        </ha-select>
+      </div>
+    `;
+
+    const appearanceTab = `
+      <div class="toggle-grid">
+        <ha-formfield label="Aktuellen Wert anzeigen">
+          <ha-switch
+            data-field="show_current"
+            ${this._config.show_current !== false ? 'checked' : ''}
+          ></ha-switch>
+        </ha-formfield>
+        <ha-formfield label="Beschriftungen anzeigen">
+          <ha-switch
+            data-field="show_labels"
+            ${this._config.show_labels !== false ? 'checked' : ''}
+          ></ha-switch>
+        </ha-formfield>
+        <ha-formfield label="Min/Max anzeigen">
+          <ha-switch
+            data-field="show_min_max"
+            ${this._config.show_min_max !== false ? 'checked' : ''}
+          ></ha-switch>
+        </ha-formfield>
+        <ha-formfield label="Icons anzeigen">
+          <ha-switch
+            data-field="show_icons"
+            ${this._config.show_icons !== false ? 'checked' : ''}
+          ></ha-switch>
+        </ha-formfield>
+        <ha-formfield label="Kompakte Darstellung">
+          <ha-switch
+            data-field="compact"
+            ${this._config.compact === true ? 'checked' : ''}
+          ></ha-switch>
+        </ha-formfield>
+      </div>
+    `;
+
+    const entitiesTab = `
+      <div class="entities">
+        ${this._entities
+          .map((entity, index) => {
+            const showLabels = entity.show_labels === undefined ? 'inherit' : entity.show_labels ? 'true' : 'false';
+            const showMinMax = entity.show_min_max === undefined ? 'inherit' : entity.show_min_max ? 'true' : 'false';
+            const showCurrent = entity.show_current === undefined ? 'inherit' : entity.show_current ? 'true' : 'false';
+            const showIcons = entity.show_icons === undefined ? 'inherit' : entity.show_icons ? 'true' : 'false';
+            return `
+              <div class="entity-card" data-index="${index}">
+                <div class="entity-header">
+                  <span>Entität ${index + 1}</span>
+                  <ha-icon-button
+                    aria-label="Entität entfernen"
+                    data-entity-index="${index}"
+                    class="remove-entity"
+                    icon="mdi:delete"
+                  ></ha-icon-button>
+                </div>
+                <div class="entity-grid">
+                  <ha-entity-picker
+                    label="Entity"
+                    value="${entity.entity ?? ''}"
+                    data-field="entity"
+                    data-entity-index="${index}"
+                    allow-custom-entity
+                  ></ha-entity-picker>
+                  <ha-textfield
+                    label="Name"
+                    data-field="name"
+                    data-entity-index="${index}"
+                    value="${entity.name ?? ''}"
+                  ></ha-textfield>
+                  <ha-textfield
+                    label="Stunden"
+                    type="number"
+                    min="1"
+                    step="1"
+                    data-field="hours"
+                    data-entity-index="${index}"
+                    value="${entity.hours ?? ''}"
+                  ></ha-textfield>
+                  <ha-textfield
+                    label="Intervalle"
+                    type="number"
+                    min="1"
+                    step="1"
+                    data-field="intervals"
+                    data-entity-index="${index}"
+                    value="${entity.intervals ?? ''}"
+                  ></ha-textfield>
+                  <ha-select
+                    label="Beschriftungen"
+                    data-field="show_labels"
+                    data-entity-index="${index}"
+                    data-value="${showLabels}"
+                  >
+                    <mwc-list-item value="inherit">Von Karte übernehmen</mwc-list-item>
+                    <mwc-list-item value="true">Anzeigen</mwc-list-item>
+                    <mwc-list-item value="false">Ausblenden</mwc-list-item>
+                  </ha-select>
+                  <ha-select
+                    label="Min/Max"
+                    data-field="show_min_max"
+                    data-entity-index="${index}"
+                    data-value="${showMinMax}"
+                  >
+                    <mwc-list-item value="inherit">Von Karte übernehmen</mwc-list-item>
+                    <mwc-list-item value="true">Anzeigen</mwc-list-item>
+                    <mwc-list-item value="false">Ausblenden</mwc-list-item>
+                  </ha-select>
+                  <ha-select
+                    label="Aktueller Wert"
+                    data-field="show_current"
+                    data-entity-index="${index}"
+                    data-value="${showCurrent}"
+                  >
+                    <mwc-list-item value="inherit">Von Karte übernehmen</mwc-list-item>
+                    <mwc-list-item value="true">Anzeigen</mwc-list-item>
+                    <mwc-list-item value="false">Ausblenden</mwc-list-item>
+                  </ha-select>
+                  <ha-select
+                    label="Icon"
+                    data-field="show_icons"
+                    data-entity-index="${index}"
+                    data-value="${showIcons}"
+                  >
+                    <mwc-list-item value="inherit">Von Karte übernehmen</mwc-list-item>
+                    <mwc-list-item value="true">Anzeigen</mwc-list-item>
+                    <mwc-list-item value="false">Ausblenden</mwc-list-item>
+                  </ha-select>
+                </div>
+              </div>
+            `;
+          })
+          .join('')}
+        <mwc-button class="add-entity" outlined>
+          <ha-icon slot="icon" icon="mdi:plus"></ha-icon>
+          Entität hinzufügen
+        </mwc-button>
+      </div>
+    `;
+
+    const tabContent = [generalTab, appearanceTab, entitiesTab][this._selectedTab] || generalTab;
+
+    this.shadowRoot.innerHTML = `
+      <style>
+        :host {
+          display: block;
+          padding: 16px;
+          color: var(--primary-text-color);
+        }
+        .tab-bar {
+          display: flex;
+          gap: 4px;
+          border-bottom: 1px solid var(--divider-color);
+          margin: 0 -16px 16px;
+          padding: 0 16px;
+        }
+        .tab-bar button {
+          position: relative;
+          border: none;
+          background: none;
+          cursor: pointer;
+          padding: 12px 16px;
+          margin: 0;
+          font: inherit;
+          color: var(--secondary-text-color);
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+          font-weight: 600;
+          transition: color 0.2s ease;
+        }
+        .tab-bar button::after {
+          content: '';
+          position: absolute;
+          left: 12px;
+          right: 12px;
+          bottom: 0;
+          height: 2px;
+          background: transparent;
+          transform: scaleX(0);
+          transform-origin: center;
+          transition: transform 0.2s ease, background 0.2s ease;
+        }
+        .tab-bar button.active {
+          color: var(--primary-color);
+        }
+        .tab-bar button.active::after {
+          background: var(--primary-color);
+          transform: scaleX(1);
+        }
+        .tab-bar button:focus-visible {
+          outline: none;
+          box-shadow: 0 0 0 2px var(--primary-color);
+          border-radius: 6px;
+        }
+        .tab-bar button:hover:not(.active) {
+          color: var(--primary-text-color);
+        }
+        .form-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+          gap: 16px;
+        }
+        .toggle-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+          gap: 16px;
+        }
+        .entities {
+          display: flex;
+          flex-direction: column;
+          gap: 16px;
+        }
+        .entity-card {
+          border-radius: 12px;
+          border: 1px solid var(--divider-color);
+          padding: 16px;
+          background: var(--card-background-color, var(--ha-card-background, #fff));
+          box-shadow: var(--ha-card-box-shadow, none);
+        }
+        .entity-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          margin-bottom: 12px;
+        }
+        .entity-grid {
+          display: grid;
+          gap: 12px;
+          grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        }
+        mwc-button.add-entity {
+          align-self: flex-start;
+        }
+      </style>
+      <div class="tab-bar" role="tablist" aria-label="Karteneinstellungen">
+        ${tabs
+          .map(
+            (label, index) => `
+              <button
+                type="button"
+                class="tab ${index === this._selectedTab ? 'active' : ''}"
+                data-index="${index}"
+                role="tab"
+                aria-selected="${index === this._selectedTab}"
+                tabindex="${index === this._selectedTab ? '0' : '-1'}"
+              >${label}</button>
+            `
+          )
+          .join('')}
+      </div>
+      <div class="tab-content">${tabContent}</div>
+    `;
+
+    this.shadowRoot.querySelectorAll('.tab-bar button').forEach((tab) => {
+      tab.addEventListener('click', () => {
+        const index = Number(tab.dataset.index || 0);
+        if (index !== this._selectedTab) {
+          this._setSelectedTab(index);
+        }
+      });
+
+      tab.addEventListener('keydown', (ev) => {
+        const key = ev.key;
+        if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(key)) {
+          return;
+        }
+
+        ev.preventDefault();
+        const tabCount = tabs.length;
+        let nextIndex = this._selectedTab;
+
+        if (key === 'ArrowLeft') {
+          nextIndex = (this._selectedTab - 1 + tabCount) % tabCount;
+        } else if (key === 'ArrowRight') {
+          nextIndex = (this._selectedTab + 1) % tabCount;
+        } else if (key === 'Home') {
+          nextIndex = 0;
+        } else if (key === 'End') {
+          nextIndex = tabCount - 1;
+        }
+
+        if (nextIndex !== this._selectedTab) {
+          this._setSelectedTab(nextIndex);
+        }
+      });
+    });
+
+    if (this._shouldFocusSelectedTab) {
+      const activeTab = this.shadowRoot.querySelector('.tab-bar button.active');
+      if (activeTab) {
+        activeTab.focus();
+      }
+      this._shouldFocusSelectedTab = false;
+    }
+
+    this.shadowRoot.querySelectorAll('ha-textfield[data-field]').forEach((input) => {
+      const handler = (ev) => this._valueChanged(ev);
+      input.addEventListener('input', handler);
+      input.addEventListener('change', handler);
+    });
+
+    this.shadowRoot.querySelectorAll('ha-switch[data-field]').forEach((toggle) => {
+      toggle.addEventListener('change', (ev) => this._valueChanged(ev));
+    });
+
+    this.shadowRoot.querySelectorAll('ha-select[data-field]').forEach((select) => {
+      if (select.dataset.value !== undefined) {
+        select.value = select.dataset.value;
+      }
+      select.addEventListener('selected', (ev) => this._valueChanged(ev));
+      select.addEventListener('closed', (ev) => this._valueChanged(ev));
+      select.addEventListener('value-changed', (ev) => this._valueChanged(ev));
+    });
+
+    this.shadowRoot.querySelectorAll('ha-entity-picker[data-field="entity"]').forEach((picker) => {
+      if (this._hass) {
+        picker.hass = this._hass;
+      }
+      if (picker.hasAttribute('value')) {
+        picker.value = picker.getAttribute('value');
+      }
+      picker.addEventListener('value-changed', (ev) => this._entityPickerChanged(ev));
+    });
+
+    const addButton = this.shadowRoot.querySelector('.add-entity');
+    if (addButton) {
+      addButton.addEventListener('click', () => this._addEntity());
+    }
+
+    this.shadowRoot.querySelectorAll('.remove-entity').forEach((button) => {
+      button.addEventListener('click', (ev) => this._removeEntity(ev));
+    });
+  }
+
+  _entityPickerChanged(ev) {
+    const target = ev.target;
+    if (!target || target.dataset.entityIndex === undefined) {
+      return;
+    }
+    const index = Number(target.dataset.entityIndex);
+    const value = ev.detail?.value || target.value || '';
+    const entities = [...this._entities];
+    const updated = { ...entities[index], entity: value };
+    entities[index] = updated;
+    this._config = { ...this._config, entities };
+    this._updateConfig();
+  }
+
+  _valueChanged(ev) {
+    const target = ev.target;
+    if (!target || !target.dataset) return;
+
+    const field = target.dataset.field;
+    if (!field) return;
+
+    let value;
+    if (target.localName === 'ha-switch') {
+      value = target.checked;
+    } else if (target.localName === 'ha-select') {
+      const selectValue = target.value ?? target.dataset.value;
+      value = selectValue;
+      if (value === undefined && ev.detail && 'value' in ev.detail) {
+        value = ev.detail.value;
+      }
+    } else if (target.type === 'number') {
+      value = target.value === '' ? undefined : Number(target.value);
+    } else {
+      value = target.value;
+    }
+
+    if (target.dataset.entityIndex !== undefined) {
+      const index = Number(target.dataset.entityIndex);
+      const entities = [...this._entities];
+      const updated = { ...entities[index] };
+
+      if (target.localName === 'ha-select') {
+        if (value === 'inherit') {
+          delete updated[field];
+        } else if (value === 'true' || value === true) {
+          updated[field] = true;
+        } else if (value === 'false' || value === false) {
+          updated[field] = false;
+        }
+      } else if (value === '' || value === undefined || (Number.isNaN(value) && target.type === 'number')) {
+        delete updated[field];
+      } else {
+        updated[field] = value;
+      }
+
+      entities[index] = updated;
+      this._config = { ...this._config, entities };
+    } else {
+      const updatedConfig = { ...this._config };
+
+      if (target.localName === 'ha-switch') {
+        updatedConfig[field] = value;
+      } else if (target.localName === 'ha-select') {
+        updatedConfig[field] = value;
+      } else if (value === '' || value === undefined || (Number.isNaN(value) && target.type === 'number')) {
+        delete updatedConfig[field];
+      } else {
+        updatedConfig[field] = value;
+      }
+
+      this._config = updatedConfig;
+    }
+
+    this._updateConfig();
+  }
+
+  _addEntity() {
+    const entities = [...this._entities, { entity: '' }];
+    this._config = { ...this._config, entities };
+    this._setSelectedTab(2);
+    this._updateConfig();
+  }
+
+  _removeEntity(ev) {
+    const index = Number(ev.currentTarget?.dataset?.entityIndex);
+    if (Number.isNaN(index)) {
+      return;
+    }
+    const entities = this._entities.filter((_, i) => i !== index);
+    this._config = { ...this._config, entities };
+    this.render();
+    this._updateConfig();
+  }
+
+  _setSelectedTab(index) {
+    this._selectedTab = index;
+    this._shouldFocusSelectedTab = true;
+    this.render();
+  }
+
+  _updateConfig() {
+    const cleanedEntities = this._entities.map((entity) => {
+      const cleaned = { ...entity };
+      Object.keys(cleaned).forEach((key) => {
+        if (cleaned[key] === '' || cleaned[key] === undefined) {
+          delete cleaned[key];
+        }
+      });
+      return cleaned;
+    });
+
+    const config = {
+      ...this._config,
+      entities: cleanedEntities,
+    };
+
+    this.dispatchEvent(
+      new CustomEvent('config-changed', {
+        detail: { config },
+        bubbles: true,
+        composed: true,
+      })
+    );
+  }
+}
+
+if (!customElements.get('waterfall-history-card-editor')) {
+  customElements.define('waterfall-history-card-editor', WaterfallHistoryCardEditor);
+}
 
 window.customCards = window.customCards || [];
 window.customCards.push({
