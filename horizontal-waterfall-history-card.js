@@ -1005,7 +1005,7 @@ class WaterfallHistoryCardEditor extends HTMLElement {
         <ha-textfield
           label="Höhe (px)"
           type="number"
-          min="10"
+          min="1"
           step="1"
           data-field="height"
           value="${this._config.height ?? ''}"
