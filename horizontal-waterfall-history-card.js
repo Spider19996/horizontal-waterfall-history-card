@@ -558,19 +558,59 @@ console.info(
   'color: white; font-weight: bold; background: dimgray'
 );
 
+const resolveLitDependencies = () => {
+  const globalCandidates = [
+    window.litElement,
+    window.Lit,
+    {
+      LitElement: window.LitElement,
+      html: window.litHtml || window.html,
+      css: window.litCSS || window.css,
+    },
+  ];
+
+  for (const candidate of globalCandidates) {
+    if (!candidate) continue;
+    const LitElementBase = candidate.LitElement;
+    const html = candidate.html || window.litHtml || window.html;
+    const css = candidate.css || window.litCSS || window.css;
+    if (LitElementBase && html) {
+      return { LitElementBase, html, css };
+    }
+  }
+
+  const tagCandidates = [
+    'ha-panel-lovelace',
+    'hui-view',
+    'hui-masonry-view',
+    'hui-root',
+  ];
+
+  for (const tag of tagCandidates) {
+    const elementClass = customElements.get(tag);
+    if (!elementClass) continue;
+    const LitElementBase = Object.getPrototypeOf(elementClass);
+    const html = window.litHtml || window.html || window.litElement?.html || window.Lit?.html;
+    const css = window.litCSS || window.css || window.litElement?.css || window.Lit?.css;
+    if (LitElementBase && LitElementBase.prototype && typeof LitElementBase.prototype.createRenderRoot === 'function' && html) {
+      return { LitElementBase, html, css };
+    }
+  }
+
+  return undefined;
+};
+
 const registerWaterfallHistoryCardEditor = () => {
   if (customElements.get('waterfall-history-card-editor')) {
     return true;
   }
 
-  const litLib = window.litElement || window.Lit || {};
-  const LitElementBase = litLib.LitElement || window.LitElement;
-  const html = litLib.html || window.html;
-  const css = litLib.css || window.css;
-
-  if (!LitElementBase || !html || !css) {
+  const litContext = resolveLitDependencies();
+  if (!litContext) {
     return false;
   }
+
+  const { LitElementBase, html, css } = litContext;
 
   class WaterfallHistoryCardEditor extends LitElementBase {
     static get properties() {
@@ -622,7 +662,7 @@ const registerWaterfallHistoryCardEditor = () => {
     }
 
     render() {
-      if (!html || !css) {
+      if (!html) {
         return null;
       }
 
@@ -1045,6 +1085,9 @@ const registerWaterfallHistoryCardEditor = () => {
     }
 
     static get styles() {
+      if (!css) {
+        return [];
+      }
       return css`
         .editor {
           display: flex;
@@ -1129,7 +1172,7 @@ if (!registerWaterfallHistoryCardEditor()) {
     if (registerWaterfallHistoryCardEditor()) {
       return;
     }
-    if (attempts < 5) {
+    if (attempts < 10) {
       attempts += 1;
       setTimeout(retryRegistration, 1000);
     }
