@@ -629,8 +629,15 @@ class WaterfallHistoryCardEditor extends HTMLElement {
       ? config.entities.map((entity) => (typeof entity === 'string' ? { entity } : { ...entity }))
       : [];
 
+    const thresholds = Array.isArray(config?.thresholds)
+      ? config.thresholds.map((threshold) => ({ ...threshold }))
+      : config?.thresholds === null
+        ? null
+        : threshold_default_number.map((threshold) => ({ ...threshold }));
+
     this._config = {
       ...config,
+      thresholds,
       entities,
     };
 
@@ -695,6 +702,42 @@ class WaterfallHistoryCardEditor extends HTMLElement {
       </div>
     `;
 
+    const thresholds = Array.isArray(this._config.thresholds)
+      ? this._config.thresholds.map((threshold) => ({ ...threshold }))
+      : [];
+
+    const thresholdsList = thresholds.length
+      ? thresholds
+          .map(
+            (threshold, index) => `
+                <div class="threshold-row" data-threshold-index="${index}">
+                  <ha-textfield
+                    label="Wert"
+                    type="number"
+                    min="0"
+                    step="1"
+                    data-threshold-field="value"
+                    data-threshold-index="${index}"
+                    value="${threshold.value ?? ''}"
+                  ></ha-textfield>
+                  <ha-textfield
+                    label="Farbe (#RRGGBB)"
+                    data-threshold-field="color"
+                    data-threshold-index="${index}"
+                    value="${threshold.color ?? ''}"
+                  ></ha-textfield>
+                  <ha-icon-button
+                    aria-label="Schwelle entfernen"
+                    class="remove-threshold"
+                    data-threshold-index="${index}"
+                    icon="mdi:delete"
+                  ></ha-icon-button>
+                </div>
+              `
+          )
+          .join('')
+      : '<p class="threshold-empty">Keine Schwellenwerte definiert.</p>';
+
     const appearanceTab = `
       <div class="toggle-grid">
         <ha-formfield label="Aktuellen Wert anzeigen">
@@ -727,6 +770,23 @@ class WaterfallHistoryCardEditor extends HTMLElement {
             ${this._config.compact === true ? 'checked' : ''}
           ></ha-switch>
         </ha-formfield>
+      </div>
+      <div class="thresholds-section">
+        <h3>Schwellenwerte</h3>
+        <p class="threshold-description">Definiere Werte und Farben für die farbliche Darstellung.</p>
+        <div class="threshold-list">
+          ${thresholdsList}
+        </div>
+        <div class="threshold-actions">
+          <mwc-button class="add-threshold" outlined>
+            <ha-icon slot="icon" icon="mdi:plus"></ha-icon>
+            Schwelle hinzufügen
+          </mwc-button>
+          <mwc-button class="reset-thresholds">
+            <ha-icon slot="icon" icon="mdi:restore"></ha-icon>
+            Standardwerte
+          </mwc-button>
+        </div>
       </div>
     `;
 
@@ -900,6 +960,46 @@ class WaterfallHistoryCardEditor extends HTMLElement {
           grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
           gap: 16px;
         }
+        .thresholds-section {
+          margin-top: 24px;
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+        }
+        .thresholds-section h3 {
+          margin: 0;
+          font-size: 1rem;
+          font-weight: 600;
+        }
+        .threshold-description {
+          margin: 0;
+          color: var(--secondary-text-color);
+          font-size: 0.9rem;
+        }
+        .threshold-list {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+        }
+        .threshold-row {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)) auto;
+          gap: 12px;
+          align-items: end;
+        }
+        .threshold-row ha-textfield {
+          width: 100%;
+        }
+        .threshold-empty {
+          margin: 0;
+          color: var(--secondary-text-color);
+          font-style: italic;
+        }
+        .threshold-actions {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+        }
         .entities {
           display: flex;
           flex-direction: column;
@@ -1007,6 +1107,12 @@ class WaterfallHistoryCardEditor extends HTMLElement {
       select.addEventListener('value-changed', (ev) => this._valueChanged(ev));
     });
 
+    this.shadowRoot.querySelectorAll('ha-textfield[data-threshold-field]').forEach((input) => {
+      const handler = (ev) => this._thresholdInputChanged(ev);
+      input.addEventListener('input', handler);
+      input.addEventListener('change', handler);
+    });
+
     this.shadowRoot.querySelectorAll('ha-entity-picker[data-field="entity"]').forEach((picker) => {
       if (this._hass) {
         picker.hass = this._hass;
@@ -1021,6 +1127,20 @@ class WaterfallHistoryCardEditor extends HTMLElement {
     if (addButton) {
       addButton.addEventListener('click', () => this._addEntity());
     }
+
+    const addThresholdButton = this.shadowRoot.querySelector('.add-threshold');
+    if (addThresholdButton) {
+      addThresholdButton.addEventListener('click', () => this._addThreshold());
+    }
+
+    const resetThresholdsButton = this.shadowRoot.querySelector('.reset-thresholds');
+    if (resetThresholdsButton) {
+      resetThresholdsButton.addEventListener('click', () => this._resetThresholds());
+    }
+
+    this.shadowRoot.querySelectorAll('.remove-threshold').forEach((button) => {
+      button.addEventListener('click', (ev) => this._removeThreshold(ev));
+    });
 
     this.shadowRoot.querySelectorAll('.remove-entity').forEach((button) => {
       button.addEventListener('click', (ev) => this._removeEntity(ev));
@@ -1100,6 +1220,113 @@ class WaterfallHistoryCardEditor extends HTMLElement {
       this._config = updatedConfig;
     }
 
+    this._updateConfig();
+  }
+
+  _thresholdInputChanged(ev) {
+    const target = ev.target;
+    if (!target) return;
+
+    const indexAttr = target.dataset.thresholdIndex;
+    if (indexAttr === undefined) return;
+    const index = Number(indexAttr);
+    if (Number.isNaN(index)) return;
+
+    const field = target.dataset.thresholdField;
+    if (!field) return;
+
+    const thresholds = Array.isArray(this._config.thresholds)
+      ? this._config.thresholds.map((threshold) => ({ ...threshold }))
+      : [];
+
+    while (thresholds.length <= index) {
+      thresholds.push({});
+    }
+
+    const updated = { ...thresholds[index] };
+
+    if (field === 'value') {
+      const value = target.value === '' ? undefined : Number(target.value);
+      if (value === undefined || Number.isNaN(value)) {
+        delete updated.value;
+      } else {
+        updated.value = value;
+      }
+    } else if (field === 'color') {
+      const color = (target.value || '').trim();
+      if (color === '') {
+        delete updated.color;
+      } else {
+        updated.color = color;
+      }
+    }
+
+    thresholds[index] = updated;
+
+    const cleaned = thresholds.filter((threshold) => Object.keys(threshold).length > 0);
+    const updatedConfig = { ...this._config };
+
+    if (cleaned.length) {
+      updatedConfig.thresholds = cleaned;
+    } else {
+      delete updatedConfig.thresholds;
+    }
+
+    const shouldRerender = cleaned.length !== thresholds.length;
+
+    this._config = updatedConfig;
+
+    if (shouldRerender) {
+      this.render();
+      this._updateConfig();
+      return;
+    }
+
+    this._updateConfig();
+  }
+
+  _addThreshold() {
+    const thresholds = Array.isArray(this._config.thresholds)
+      ? this._config.thresholds.map((threshold) => ({ ...threshold }))
+      : [];
+
+    const lastThreshold = thresholds[thresholds.length - 1];
+    const nextValue = typeof lastThreshold?.value === 'number' ? lastThreshold.value + 5 : 0;
+    const nextColor = lastThreshold?.color || threshold_default_number[0].color;
+
+    thresholds.push({ value: nextValue, color: nextColor });
+
+    this._config = { ...this._config, thresholds };
+    this.render();
+    this._updateConfig();
+  }
+
+  _removeThreshold(ev) {
+    const index = Number(ev.currentTarget?.dataset?.thresholdIndex ?? ev.target?.dataset?.thresholdIndex);
+    if (Number.isNaN(index)) {
+      return;
+    }
+
+    const thresholds = Array.isArray(this._config.thresholds)
+      ? this._config.thresholds.filter((_, i) => i !== index)
+      : [];
+
+    const updatedConfig = { ...this._config };
+    if (thresholds.length) {
+      updatedConfig.thresholds = thresholds;
+    } else {
+      delete updatedConfig.thresholds;
+    }
+
+    this._config = updatedConfig;
+    this.render();
+    this._updateConfig();
+  }
+
+  _resetThresholds() {
+    const thresholds = threshold_default_number.map((threshold) => ({ ...threshold }));
+    this._config = { ...this._config, thresholds };
+    this.render();
     this._updateConfig();
   }
 
