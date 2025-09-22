@@ -283,29 +283,28 @@ class waterfallHistoryCard extends HTMLElement {
           const hours = entityConfig.hours ?? this.config.hours;
           const endTime = new Date();
           const startTime = new Date(endTime.getTime() - hours * 60 * 60 * 1000);
+          const entityState = this._hass?.states?.[entityId]?.state;
 
           try {
               const history = await this._hass.callApi('GET',
                   `history/period/${startTime.toISOString()}?filter_entity_id=${entityId}&end_time=${endTime.toISOString()}&significant_changes_only=1&minimal_response&no_attributes&skip_initial_state`
               );
               this._lastHistoryFetch[entityId] = now;
-              return { entityId, history: history[0], entityConfig };
+              return { entityId, history: history[0], entityConfig, entityState };
           } catch (error) {
               console.error(`Error fetching history for ${entityId}:`, error);
-              return { entityId, history: null, entityConfig }; // Return null on error to handle it gracefully
+              return { entityId, history: null, entityConfig, entityState }; // Return null on error to handle it gracefully
           }
       });
 
       const results = await Promise.all(historyPromises);
 
       const processedHistories = this.processedHistories || {};
-      results.forEach(({ entityId, history, entityConfig }) => {
-          if(history){
-              const intervals = entityConfig.intervals ?? this.config.intervals;
-              const hours = entityConfig.hours ?? this.config.hours;
-              const timeStep = (hours * 60 * 60 * 1000) / intervals;
-              processedHistories[entityId] = this.processHistoryData(history, intervals, timeStep, entityConfig);
-          }
+      results.forEach(({ entityId, history, entityConfig, entityState }) => {
+          const intervals = entityConfig.intervals ?? this.config.intervals;
+          const hours = entityConfig.hours ?? this.config.hours;
+          const timeStep = (hours * 60 * 60 * 1000) / intervals;
+          processedHistories[entityId] = this.processHistoryData(history, intervals, timeStep, entityConfig, entityState);
       });
       this.processedHistories = processedHistories;
 
@@ -636,34 +635,47 @@ class waterfallHistoryCard extends HTMLElement {
     return map[value] || value;
   }
 
-  processHistoryData(historyData, intervals, timeStep, entityConfig) {
-    const defaultValue = entityConfig.default_value ?? this.config.default_value;
-    const processed = new Array(intervals).fill(defaultValue);
+  processHistoryData(historyData, intervals, timeStep, entityConfig, currentState) {
+    const hasEntityDefault = Object.prototype.hasOwnProperty.call(entityConfig, 'default_value');
+    const hasGlobalDefault = this.config && Object.prototype.hasOwnProperty.call(this.config, 'default_value');
+    const rawDefault = hasEntityDefault
+      ? entityConfig.default_value
+      : (hasGlobalDefault ? this.config.default_value : undefined);
+    const resolvedDefault = rawDefault !== undefined ? this.parseState(rawDefault) : null;
+    const processed = new Array(intervals).fill(resolvedDefault);
     const hours = entityConfig.hours ?? this.config.hours;
     const startTime = Date.now() - (hours * 60 * 60 * 1000);
 
-    if (historyData) {
-        historyData.forEach(point => {
-          const pointTime = new Date(point.last_changed || point.last_updated).getTime();
-          const timeDiff = pointTime - startTime;
-          if (timeDiff >= 0) {
-            const bucketIndex = Math.floor(timeDiff / timeStep);
-            if (bucketIndex >= 0 && bucketIndex < intervals) {
-              processed[bucketIndex] = this.parseState(point.state);
-            }
-          }
-        });
-    }
+    let hasHistoryValues = false;
+    const historyList = Array.isArray(historyData) ? historyData : [];
+    historyList.forEach(point => {
+      const pointTime = new Date(point.last_changed || point.last_updated).getTime();
+      const timeDiff = pointTime - startTime;
+      if (Number.isFinite(timeDiff) && timeDiff >= 0) {
+        const bucketIndex = Math.floor(timeDiff / timeStep);
+        if (bucketIndex >= 0 && bucketIndex < intervals) {
+          processed[bucketIndex] = this.parseState(point.state);
+          hasHistoryValues = true;
+        }
+      }
+    });
 
     for (let i = 1; i < processed.length; i++) {
-        if (processed[i] === null && processed[i - 1] !== null) {
-            processed[i] = processed[i - 1];
-        }
+      if (processed[i] === null && processed[i - 1] !== null) {
+        processed[i] = processed[i - 1];
+      }
     }
     for (let i = processed.length - 2; i >= 0; i--) {
-        if (processed[i] === null && processed[i + 1] !== null) {
-            processed[i] = processed[i + 1];
-        }
+      if (processed[i] === null && processed[i + 1] !== null) {
+        processed[i] = processed[i + 1];
+      }
+    }
+
+    const fallbackValue = this.parseState(currentState);
+    const hasConfiguredDefault = hasEntityDefault || hasGlobalDefault;
+    const hasMeaningfulData = processed.some(value => value !== resolvedDefault);
+    if (!hasHistoryValues && !hasMeaningfulData && !hasConfiguredDefault && fallbackValue !== null && fallbackValue !== undefined) {
+      processed.fill(fallbackValue);
     }
 
     return processed;
