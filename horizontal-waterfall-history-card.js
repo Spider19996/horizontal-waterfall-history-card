@@ -42,6 +42,8 @@ class waterfallHistoryCard extends HTMLElement {
         hours_ago: 'h ago',
         minutes_ago: 'm ago',
         now: 'Now',
+        uptime_label: 'Uptime',
+        uptime_unavailable: 'No data',
         language_label: 'Language',
         language_auto: 'Auto',
         language_en: 'English',
@@ -56,6 +58,8 @@ class waterfallHistoryCard extends HTMLElement {
         hours_ago: 'Std. zuvor',
         minutes_ago: 'Min. zuvor',
         now: 'Jetzt',
+        uptime_label: 'Verfügbarkeit',
+        uptime_unavailable: 'Keine Daten',
         language_label: 'Sprache',
         language_auto: 'Auto',
         language_en: 'Englisch',
@@ -70,6 +74,8 @@ class waterfallHistoryCard extends HTMLElement {
         hours_ago: 'h',
         minutes_ago: 'min',
         now: 'Actuel',
+        uptime_label: 'Disponibilité',
+        uptime_unavailable: 'Pas de données',
         language_label: 'Langue',
         language_auto: 'Auto',
         language_en: 'Anglais',
@@ -155,6 +161,7 @@ class waterfallHistoryCard extends HTMLElement {
         show_labels: config.show_labels !== false,
         show_min_max: config.show_min_max !== false,
         show_icons: config.show_icons !== false,
+        show_uptime: config.show_uptime !== false,
         unit: config.unit || null,
         icon: config.icon || null,
         compact: config.compact === true,
@@ -383,11 +390,21 @@ class waterfallHistoryCard extends HTMLElement {
           transition: inherit;
         }
         .labels {
-          display: flex;
-          justify-content: space-between;
+          display: grid;
+          grid-template-columns: repeat(3, 1fr);
+          align-items: center;
           font-size: 11px;
           color: var(--secondary-text-color, gray);
           margin-top: ${this.config.compact ? "0px" : "4px"};
+        }
+        .labels .label-start {
+          text-align: left;
+        }
+        .labels .label-center {
+          text-align: center;
+        }
+        .labels .label-end {
+          text-align: right;
         }
         .min-max-label {
           font-size: 11px;
@@ -443,8 +460,14 @@ class waterfallHistoryCard extends HTMLElement {
         const showLabels = entityConfig.show_labels ?? this.config.show_labels;
         const showMinMax = entityConfig.show_min_max ?? this.config.show_min_max;
         const showCurrent = entityConfig.show_current ?? this.config.show_current;
+        const showUptime = entityConfig.show_uptime ?? this.config.show_uptime;
         const hours = entityConfig.hours ?? this.config.hours;
         const intervals = entityConfig.intervals ?? this.config.intervals;
+        const uptimeRatio = showUptime ? this.calculateUptime(history, entityId) : null;
+        const uptimeText = uptimeRatio === null
+          ? this.t('uptime_unavailable')
+          : `${(uptimeRatio * 100).toFixed(2)}% ${this.t('uptime_label')}`;
+        const shouldShowLabelsRow = showLabels || showUptime;
 
         return `
           <div class="entity-container" data-entity-id="${entityId}" >
@@ -465,10 +488,11 @@ class waterfallHistoryCard extends HTMLElement {
                         </div>`;
               }).join('')}
             </div>
-            ${showLabels ? `
+            ${shouldShowLabelsRow ? `
               <div class="labels">
-                <span>${hours}${this.t('hours_ago')}</span>
-                <span>${this.t('now')}</span>
+                <span class="label-start">${showLabels ? `${hours}${this.t('hours_ago')}` : ''}</span>
+                <span class="label-center">${showUptime ? uptimeText : ''}</span>
+                <span class="label-end">${showLabels ? this.t('now') : ''}</span>
               </div>
             ` : ''}
             ${showMinMax ? `
@@ -630,6 +654,42 @@ class waterfallHistoryCard extends HTMLElement {
           return state.toFixed(digits) + this.getUnit(entityConfig);
       }
       return (state ?? 'N/A') + this.getUnit(entityConfig);
+  }
+
+  calculateUptime(values, entityId) {
+    if (!Array.isArray(values) || values.length === 0) {
+      return null;
+    }
+
+    const total = values.length;
+    if (!Number.isFinite(total) || total <= 0) {
+      return null;
+    }
+
+    const domain = typeof entityId === 'string' ? entityId.split('.')[0] : '';
+    const booleanDomains = new Set(['binary_sensor', 'switch', 'lock', 'cover', 'fan', 'humidifier']);
+
+    const validValues = values.filter((value) => value !== null && value !== undefined);
+    if (validValues.length === 0) {
+      return null;
+    }
+
+    const isBinaryValues = validValues.every((value) => value === 0 || value === 1);
+    const treatAsBinary = isBinaryValues || booleanDomains.has(domain);
+
+    let uptimeCount;
+    if (treatAsBinary) {
+      uptimeCount = values.filter((value) => value === 1).length;
+    } else {
+      uptimeCount = validValues.length;
+    }
+
+    const ratio = uptimeCount / total;
+    if (!Number.isFinite(ratio)) {
+      return null;
+    }
+
+    return Math.min(1, Math.max(0, ratio));
   }
 
   getColorForValue(value, entityConfig) {
@@ -1015,6 +1075,12 @@ class WaterfallHistoryCardEditor extends HTMLElement {
             ${this._config.show_labels !== false ? 'checked' : ''}
           ></ha-switch>
         </ha-formfield>
+        <ha-formfield label="Uptime anzeigen">
+          <ha-switch
+            data-field="show_uptime"
+            ${this._config.show_uptime !== false ? 'checked' : ''}
+          ></ha-switch>
+        </ha-formfield>
         <ha-formfield label="Min/Max anzeigen">
           <ha-switch
             data-field="show_min_max"
@@ -1103,6 +1169,7 @@ class WaterfallHistoryCardEditor extends HTMLElement {
         ${this._entities
           .map((entity, index) => {
             const showLabels = entity.show_labels === undefined ? 'inherit' : entity.show_labels ? 'true' : 'false';
+            const showUptime = entity.show_uptime === undefined ? 'inherit' : entity.show_uptime ? 'true' : 'false';
             const showMinMax = entity.show_min_max === undefined ? 'inherit' : entity.show_min_max ? 'true' : 'false';
             const showCurrent = entity.show_current === undefined ? 'inherit' : entity.show_current ? 'true' : 'false';
             const showIcons = entity.show_icons === undefined ? 'inherit' : entity.show_icons ? 'true' : 'false';
@@ -1188,6 +1255,16 @@ class WaterfallHistoryCardEditor extends HTMLElement {
                     data-field="show_labels"
                     data-entity-index="${index}"
                     data-value="${showLabels}"
+                  >
+                    <mwc-list-item value="inherit">Von Karte übernehmen</mwc-list-item>
+                    <mwc-list-item value="true">Anzeigen</mwc-list-item>
+                    <mwc-list-item value="false">Ausblenden</mwc-list-item>
+                  </ha-select>
+                  <ha-select
+                    label="Uptime"
+                    data-field="show_uptime"
+                    data-entity-index="${index}"
+                    data-value="${showUptime}"
                   >
                     <mwc-list-item value="inherit">Von Karte übernehmen</mwc-list-item>
                     <mwc-list-item value="true">Anzeigen</mwc-list-item>
