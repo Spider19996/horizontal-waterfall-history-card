@@ -20,10 +20,6 @@ const fireEvent = (node, type, detail, options) => {
   return event;
 };
 
-const lit = window.Lit || window.litElement || {};
-const LitElementBase = lit.LitElement || window.LitElement;
-const html = lit.html || window.html;
-const css = lit.css || window.css;
 
 class waterfallHistoryCard extends HTMLElement {
   // FIX: Hardcoded default domain icons
@@ -562,7 +558,20 @@ console.info(
   'color: white; font-weight: bold; background: dimgray'
 );
 
-if (LitElementBase && html && css && !customElements.get('waterfall-history-card-editor')) {
+const registerWaterfallHistoryCardEditor = () => {
+  if (customElements.get('waterfall-history-card-editor')) {
+    return true;
+  }
+
+  const litLib = window.litElement || window.Lit || {};
+  const LitElementBase = litLib.LitElement || window.LitElement;
+  const html = litLib.html || window.html;
+  const css = litLib.css || window.css;
+
+  if (!LitElementBase || !html || !css) {
+    return false;
+  }
+
   class WaterfallHistoryCardEditor extends LitElementBase {
     static get properties() {
       return {
@@ -1111,4 +1120,20 @@ if (LitElementBase && html && css && !customElements.get('waterfall-history-card
   }
 
   customElements.define('waterfall-history-card-editor', WaterfallHistoryCardEditor);
+  return true;
+};
+
+if (!registerWaterfallHistoryCardEditor()) {
+  let attempts = 0;
+  const retryRegistration = () => {
+    if (registerWaterfallHistoryCardEditor()) {
+      return;
+    }
+    if (attempts < 5) {
+      attempts += 1;
+      setTimeout(retryRegistration, 1000);
+    }
+  };
+  retryRegistration();
+  window.loadCardHelpers?.().then(() => registerWaterfallHistoryCardEditor());
 }
