@@ -564,7 +564,6 @@ class waterfallHistoryCard extends HTMLElement {
     };
 
     const appearance = defaults[type] || defaults.bar;
-    const dividerWidth = (type === 'bar' && gap === 0) ? '1px' : '0px';
 
     return {
       type,
@@ -572,7 +571,7 @@ class waterfallHistoryCard extends HTMLElement {
       width: appearance.width,
       height: appearance.height,
       radius: appearance.radius,
-      dividerWidth,
+      dividerWidth: '0px',
     };
   }
 
@@ -825,6 +824,9 @@ class WaterfallHistoryCardEditor extends HTMLElement {
 
     const tabs = ['Allgemein', 'Darstellung', 'Entitäten'];
     const languageValue = this._config.language ?? 'auto';
+    const segmentStyleValue = this._config.segment_style ?? 'bar';
+    const segmentSpacingValue =
+      this._config.segment_spacing === undefined ? '' : this._config.segment_spacing;
 
     const generalTab = `
       <div class="form-grid">
@@ -941,6 +943,25 @@ class WaterfallHistoryCardEditor extends HTMLElement {
           ></ha-switch>
         </ha-formfield>
       </div>
+      <div class="form-grid">
+        <ha-select
+          label="Segment-Stil"
+          data-field="segment_style"
+          data-value="${segmentStyleValue}"
+        >
+          <mwc-list-item value="bar">Balken</mwc-list-item>
+          <mwc-list-item value="line">Linie</mwc-list-item>
+          <mwc-list-item value="dot">Punkt</mwc-list-item>
+        </ha-select>
+        <ha-textfield
+          label="Segmentabstand (px)"
+          type="number"
+          min="0"
+          step="1"
+          data-field="segment_spacing"
+          value="${segmentSpacingValue}"
+        ></ha-textfield>
+      </div>
       <div class="thresholds-section">
         <h3>Schwellenwerte</h3>
         <p class="threshold-description">Definiere Werte und Farben für die farbliche Darstellung.</p>
@@ -994,6 +1015,9 @@ class WaterfallHistoryCardEditor extends HTMLElement {
             const showMinMax = entity.show_min_max === undefined ? 'inherit' : entity.show_min_max ? 'true' : 'false';
             const showCurrent = entity.show_current === undefined ? 'inherit' : entity.show_current ? 'true' : 'false';
             const showIcons = entity.show_icons === undefined ? 'inherit' : entity.show_icons ? 'true' : 'false';
+            const segmentStyle = entity.segment_style ?? 'inherit';
+            const segmentSpacing =
+              entity.segment_spacing === undefined ? '' : entity.segment_spacing;
             return `
               <div class="entity-card" data-index="${index}">
                 <div class="entity-header">
@@ -1108,6 +1132,26 @@ class WaterfallHistoryCardEditor extends HTMLElement {
                     <mwc-list-item value="true">Anzeigen</mwc-list-item>
                     <mwc-list-item value="false">Ausblenden</mwc-list-item>
                   </ha-select>
+                  <ha-select
+                    label="Segment-Stil"
+                    data-field="segment_style"
+                    data-entity-index="${index}"
+                    data-value="${segmentStyle}"
+                  >
+                    <mwc-list-item value="inherit">Von Karte übernehmen</mwc-list-item>
+                    <mwc-list-item value="bar">Balken</mwc-list-item>
+                    <mwc-list-item value="line">Linie</mwc-list-item>
+                    <mwc-list-item value="dot">Punkt</mwc-list-item>
+                  </ha-select>
+                  <ha-textfield
+                    label="Segmentabstand (px)"
+                    type="number"
+                    min="0"
+                    step="1"
+                    data-field="segment_spacing"
+                    data-entity-index="${index}"
+                    value="${segmentSpacing}"
+                  ></ha-textfield>
                 </div>
               </div>
             `;
