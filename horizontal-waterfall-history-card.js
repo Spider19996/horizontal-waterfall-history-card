@@ -1380,8 +1380,11 @@ class WaterfallHistoryCardEditor extends HTMLElement {
         select.value = select.dataset.value;
       }
       select.addEventListener('selected', (ev) => this._valueChanged(ev));
-      select.addEventListener('closed', (ev) => this._valueChanged(ev));
       select.addEventListener('value-changed', (ev) => this._valueChanged(ev));
+      // Prevent the dialog from closing when the select menu closes.
+      select.addEventListener('closed', (ev) => {
+        ev.stopPropagation();
+      });
     });
 
     this.shadowRoot.querySelectorAll('ha-textfield[data-threshold-field]').forEach((input) => {
