@@ -354,7 +354,10 @@ class waterfallHistoryCard extends HTMLElement {
           transform: translate(-50%, -50%);
           width: var(--segment-width, 100%);
           height: var(--segment-height, 100%);
+          max-width: 100%;
+          max-height: 100%;
           border-radius: var(--segment-radius, 2px);
+          aspect-ratio: var(--segment-aspect, auto);
           background-color: var(--segment-color, transparent);
           transition: inherit;
         }
@@ -412,6 +415,7 @@ class waterfallHistoryCard extends HTMLElement {
           `--segment-width: ${segmentAppearance.width}`,
           `--segment-height: ${segmentAppearance.height}`,
           `--segment-radius: ${segmentAppearance.radius}`,
+          `--segment-aspect: ${segmentAppearance.aspectRatio}`,
           `--segment-divider-width: ${segmentAppearance.dividerWidth}`,
         ].join('; ');
 
@@ -558,9 +562,19 @@ class waterfallHistoryCard extends HTMLElement {
     const gap = Number.isFinite(parsedSpacing) ? Math.max(0, parsedSpacing) : 0;
 
     const defaults = {
-      bar: { width: '100%', height: '100%', radius: '2px' },
-      line: { width: '35%', height: '100%', radius: '2px' },
-      dot: { width: '55%', height: '55%', radius: '9999px' },
+      bar: { width: '100%', height: '100%', radius: '2px', aspectRatio: 'auto' },
+      line: {
+        width: `max(2px, calc(100% - ${gap}px))`,
+        height: '100%',
+        radius: '2px',
+        aspectRatio: 'auto',
+      },
+      dot: {
+        width: '55%',
+        height: 'auto',
+        radius: '9999px',
+        aspectRatio: '1 / 1',
+      },
     };
 
     const appearance = defaults[type] || defaults.bar;
@@ -571,6 +585,7 @@ class waterfallHistoryCard extends HTMLElement {
       width: appearance.width,
       height: appearance.height,
       radius: appearance.radius,
+      aspectRatio: appearance.aspectRatio ?? 'auto',
       dividerWidth: '0px',
     };
   }
