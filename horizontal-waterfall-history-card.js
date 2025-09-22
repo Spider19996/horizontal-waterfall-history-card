@@ -29,6 +29,9 @@ class waterfallHistoryCard extends HTMLElement {
     this.attachShadow({ mode: 'open' });
     this._lastHistoryFetch = {}; // Timestamp of last fetch per entity
     this._historyRefreshInterval = 15 * 60 * 1000; // 15min by default
+    this._historyRefreshTimer = null;
+    this._historyRefreshTimerInterval = null;
+    this._isUpdatingCard = false;
 
     this.translations = {
       en: {
@@ -80,6 +83,14 @@ class waterfallHistoryCard extends HTMLElement {
       const lang = this.translations[this.language] ? this.language : 'en';
       return this.translations[lang][key] ?? this.translations.en[key] ?? key;
     };
+  }
+
+  connectedCallback() {
+    this._updateHistoryRefreshTimer();
+  }
+
+  disconnectedCallback() {
+    this._stopHistoryRefreshTimer();
   }
 
   setConfig(config) {
@@ -166,6 +177,8 @@ class waterfallHistoryCard extends HTMLElement {
             return { ...normalizedEntity, ...perEntitySegments };
         }),
     };
+
+    this._updateHistoryRefreshTimer();
   }
 
   set hass(hass) {
@@ -189,6 +202,7 @@ class waterfallHistoryCard extends HTMLElement {
 
     this.updateCard();
     this.updateCurrentValues();
+    this._updateHistoryRefreshTimer();
   }
 
   updateCurrentValues() {
@@ -225,54 +239,61 @@ class waterfallHistoryCard extends HTMLElement {
 
   async updateCard() {
     if (!this._hass || !this.config) return;
+    if (this._isUpdatingCard) return;
 
-    const now = Date.now();
-    
-    const entitiesToUpdate = this.config.entities.filter(entityConfig => {
-        const entityId = entityConfig.entity;
-        const hours = entityConfig.hours ?? this.config.hours;
-        const intervals = entityConfig.intervals ?? this.config.intervals;
-        const refreshInterval = ((hours / intervals) * 60 * 60 * 1000) / 2;
-        return !this._lastHistoryFetch[entityId] || (now - this._lastHistoryFetch[entityId] > refreshInterval);
-    });
+    this._isUpdatingCard = true;
 
-    if (entitiesToUpdate.length === 0 && this.shadowRoot.innerHTML) {
-      // Nothing to update and card is already rendered
-      return;
+    try {
+      const now = Date.now();
+
+      const entitiesToUpdate = this.config.entities.filter(entityConfig => {
+          const entityId = entityConfig.entity;
+          const hours = entityConfig.hours ?? this.config.hours;
+          const intervals = entityConfig.intervals ?? this.config.intervals;
+          const refreshInterval = ((hours / intervals) * 60 * 60 * 1000) / 2;
+          return !this._lastHistoryFetch[entityId] || (now - this._lastHistoryFetch[entityId] > refreshInterval);
+      });
+
+      if (entitiesToUpdate.length === 0 && this.shadowRoot.innerHTML) {
+        // Nothing to update and card is already rendered
+        return;
+      }
+
+      const historyPromises = entitiesToUpdate.map(async (entityConfig) => {
+          const entityId = entityConfig.entity;
+          const hours = entityConfig.hours ?? this.config.hours;
+          const endTime = new Date();
+          const startTime = new Date(endTime.getTime() - hours * 60 * 60 * 1000);
+
+          try {
+              const history = await this._hass.callApi('GET',
+                  `history/period/${startTime.toISOString()}?filter_entity_id=${entityId}&end_time=${endTime.toISOString()}&significant_changes_only=1&minimal_response&no_attributes&skip_initial_state`
+              );
+              this._lastHistoryFetch[entityId] = now;
+              return { entityId, history: history[0], entityConfig };
+          } catch (error) {
+              console.error(`Error fetching history for ${entityId}:`, error);
+              return { entityId, history: null, entityConfig }; // Return null on error to handle it gracefully
+          }
+      });
+
+      const results = await Promise.all(historyPromises);
+
+      const processedHistories = this.processedHistories || {};
+      results.forEach(({ entityId, history, entityConfig }) => {
+          if(history){
+              const intervals = entityConfig.intervals ?? this.config.intervals;
+              const hours = entityConfig.hours ?? this.config.hours;
+              const timeStep = (hours * 60 * 60 * 1000) / intervals;
+              processedHistories[entityId] = this.processHistoryData(history, intervals, timeStep, entityConfig);
+          }
+      });
+      this.processedHistories = processedHistories;
+
+      this.renderCard(this.processedHistories);
+    } finally {
+      this._isUpdatingCard = false;
     }
-    
-    const historyPromises = entitiesToUpdate.map(async (entityConfig) => {
-        const entityId = entityConfig.entity;
-        const hours = entityConfig.hours ?? this.config.hours;
-        const endTime = new Date();
-        const startTime = new Date(endTime.getTime() - hours * 60 * 60 * 1000);
-
-        try {
-            const history = await this._hass.callApi('GET',
-                `history/period/${startTime.toISOString()}?filter_entity_id=${entityId}&end_time=${endTime.toISOString()}&significant_changes_only=1&minimal_response&no_attributes&skip_initial_state`
-            );
-            this._lastHistoryFetch[entityId] = now;
-            return { entityId, history: history[0], entityConfig };
-        } catch (error) {
-            console.error(`Error fetching history for ${entityId}:`, error);
-            return { entityId, history: null, entityConfig }; // Return null on error to handle it gracefully
-        }
-    });
-
-    const results = await Promise.all(historyPromises);
-
-    const processedHistories = this.processedHistories || {};
-    results.forEach(({ entityId, history, entityConfig }) => {
-        if(history){
-            const intervals = entityConfig.intervals ?? this.config.intervals;
-            const hours = entityConfig.hours ?? this.config.hours;
-            const timeStep = (hours * 60 * 60 * 1000) / intervals;
-            processedHistories[entityId] = this.processHistoryData(history, intervals, timeStep, entityConfig);
-        }
-    });
-    this.processedHistories = processedHistories;
-
-    this.renderCard(this.processedHistories);
   }
 
   renderCard(processedHistories) {
@@ -682,6 +703,61 @@ class waterfallHistoryCard extends HTMLElement {
       detail: { entityId }
     });
     this.dispatchEvent(event);
+  }
+
+  _calculateHistoryRefreshInterval() {
+    if (!this.config || !Array.isArray(this.config.entities) || this.config.entities.length === 0) {
+      return this._historyRefreshInterval;
+    }
+
+    const perEntityIntervals = this.config.entities
+      .map((entityConfig) => {
+        const hours = entityConfig.hours ?? this.config.hours;
+        const intervals = entityConfig.intervals ?? this.config.intervals;
+        if (!hours || !intervals) {
+          return null;
+        }
+        const interval = ((hours / intervals) * 60 * 60 * 1000) / 2;
+        return Number.isFinite(interval) && interval > 0 ? interval : null;
+      })
+      .filter((interval) => interval !== null);
+
+    if (perEntityIntervals.length === 0) {
+      return this._historyRefreshInterval;
+    }
+
+    const computed = Math.min(...perEntityIntervals);
+    const minimumInterval = 60 * 1000; // never refresh faster than once per minute by default
+    return Math.max(minimumInterval, computed);
+  }
+
+  _updateHistoryRefreshTimer() {
+    if (!this.isConnected || !this._hass || !this.config) {
+      return;
+    }
+
+    const interval = this._calculateHistoryRefreshInterval();
+    if (!Number.isFinite(interval) || interval <= 0) {
+      return;
+    }
+
+    if (this._historyRefreshTimer && this._historyRefreshTimerInterval === interval) {
+      return;
+    }
+
+    this._stopHistoryRefreshTimer();
+    this._historyRefreshTimerInterval = interval;
+    this._historyRefreshTimer = window.setInterval(() => {
+      this.updateCard();
+    }, interval);
+  }
+
+  _stopHistoryRefreshTimer() {
+    if (this._historyRefreshTimer) {
+      clearInterval(this._historyRefreshTimer);
+      this._historyRefreshTimer = null;
+      this._historyRefreshTimerInterval = null;
+    }
   }
 
   getCardSize() {
