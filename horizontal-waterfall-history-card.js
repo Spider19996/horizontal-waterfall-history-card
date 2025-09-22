@@ -374,9 +374,27 @@ class waterfallHistoryCard extends HTMLElement {
           background-color: transparent;
           margin-inline-end: var(--segment-gap, 0px);
           flex: 0 0 auto;
+          overflow: visible;
         }
         .bar-segment:last-child {
           margin-inline-end: 0;
+        }
+        .bar-segment::before {
+          content: '';
+          position: absolute;
+          top: 50%;
+          left: 0;
+          transform: translateY(-50%);
+          width: calc(var(--segment-width, 100%) + var(--segment-gap-fill-size, 0px));
+          height: var(--segment-height, 100%);
+          max-height: 100%;
+          border-radius: var(--segment-radius, 2px);
+          background-color: var(--segment-gap-fill-color, transparent);
+          transition: inherit;
+          z-index: 0;
+        }
+        .bar-segment:last-child::before {
+          width: var(--segment-width, 100%);
         }
         .bar-segment::after {
           content: '';
@@ -392,6 +410,7 @@ class waterfallHistoryCard extends HTMLElement {
           aspect-ratio: var(--segment-aspect, auto);
           background-color: var(--segment-color, transparent);
           transition: inherit;
+          z-index: 1;
         }
         .labels {
           display: grid;
@@ -484,7 +503,16 @@ class waterfallHistoryCard extends HTMLElement {
               ${history.map((value, index) => {
                 const isLast = index === history.length - 1;
                 const color = this.getColorForValue(value, entityConfig);
-                const segmentColorStyle = `--segment-color: ${color};${segmentAppearance.type === 'bar' ? ` background-color: ${color};` : ''}`;
+                const segmentStyleParts = [`--segment-color: ${color}`];
+                if (segmentAppearance.type === 'bar') {
+                  segmentStyleParts.push(`background-color: ${color}`);
+                  if (segmentAppearance.shouldFillGap) {
+                    const gapFillSize = isLast ? '0px' : segmentAppearance.gapFill;
+                    segmentStyleParts.push(`--segment-gap-fill-size: ${gapFillSize}`);
+                    segmentStyleParts.push(`--segment-gap-fill-color: ${color}`);
+                  }
+                }
+                const segmentColorStyle = segmentStyleParts.join('; ');
                 return `<div class="bar-segment ${isLast ? 'last-bar' : ''}"
                              data-entity="${entityId}"
                              style="${segmentColorStyle}"
@@ -701,6 +729,7 @@ class waterfallHistoryCard extends HTMLElement {
     };
 
     const appearance = defaults[type] || defaults.bar;
+    const shouldFillGap = type === 'bar' && gap >= 1;
 
     return {
       type,
@@ -709,6 +738,9 @@ class waterfallHistoryCard extends HTMLElement {
       height: appearance.height,
       radius: appearance.radius,
       aspectRatio: appearance.aspectRatio ?? 'auto',
+      gap,
+      gapFill: shouldFillGap ? `${gap}px` : '0px',
+      shouldFillGap,
     };
   }
 
