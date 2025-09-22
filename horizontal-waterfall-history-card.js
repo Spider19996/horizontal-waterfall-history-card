@@ -330,12 +330,17 @@ class waterfallHistoryCard extends HTMLElement {
         const name = entityConfig.name || entity.attributes.friendly_name || entityId;
                 // FIX: derive icon per-entity if provided on the state
         // FIX: resolve icon per entity with domain fallback
-        let icon = null;
-        if (entity.attributes && entity.attributes.icon) {
-          icon = entity.attributes.icon;
-        } else {
-          const domain = entityId.split('.')[0];
-          icon = this.DEFAULT_DOMAIN_ICONS[domain] || 'mdi:bookmark';
+        let icon = entityConfig.icon;
+        if (typeof icon === 'string') {
+          icon = icon.trim();
+        }
+        if (!icon) {
+          if (entity.attributes && entity.attributes.icon) {
+            icon = entity.attributes.icon;
+          } else {
+            const domain = entityId.split('.')[0];
+            icon = this.DEFAULT_DOMAIN_ICONS[domain] || 'mdi:bookmark';
+          }
         }
         // FIX: resolve show_icons safely even if this.config is not yet defined
         const globalShowIcons = (this && this.config && this.config.show_icons !== undefined) ? this.config.show_icons : true;
@@ -915,6 +920,12 @@ class WaterfallHistoryCardEditor extends HTMLElement {
                     data-field="name"
                     data-entity-index="${index}"
                     value="${entity.name ?? ''}"
+                  ></ha-textfield>
+                  <ha-textfield
+                    label="Icon (z. B. mdi:thermometer)"
+                    data-field="icon"
+                    data-entity-index="${index}"
+                    value="${entity.icon ?? ''}"
                   ></ha-textfield>
                   <ha-textfield
                     label="Stunden"
