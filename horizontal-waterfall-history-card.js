@@ -616,6 +616,7 @@ class WaterfallHistoryCardEditor extends HTMLElement {
     this.attachShadow({ mode: 'open' });
     this._config = { entities: [] };
     this._selectedTab = 0;
+    this._shouldFocusSelectedTab = false;
   }
 
   set hass(hass) {
@@ -841,9 +842,53 @@ class WaterfallHistoryCardEditor extends HTMLElement {
           padding: 16px;
           color: var(--primary-text-color);
         }
-        ha-tabs {
-          --paper-tabs-selection-bar-color: var(--primary-color);
-          margin-bottom: 16px;
+        .tab-bar {
+          display: flex;
+          gap: 4px;
+          border-bottom: 1px solid var(--divider-color);
+          margin: 0 -16px 16px;
+          padding: 0 16px;
+        }
+        .tab-bar button {
+          position: relative;
+          border: none;
+          background: none;
+          cursor: pointer;
+          padding: 12px 16px;
+          margin: 0;
+          font: inherit;
+          color: var(--secondary-text-color);
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+          font-weight: 600;
+          transition: color 0.2s ease;
+        }
+        .tab-bar button::after {
+          content: '';
+          position: absolute;
+          left: 12px;
+          right: 12px;
+          bottom: 0;
+          height: 2px;
+          background: transparent;
+          transform: scaleX(0);
+          transform-origin: center;
+          transition: transform 0.2s ease, background 0.2s ease;
+        }
+        .tab-bar button.active {
+          color: var(--primary-color);
+        }
+        .tab-bar button.active::after {
+          background: var(--primary-color);
+          transform: scaleX(1);
+        }
+        .tab-bar button:focus-visible {
+          outline: none;
+          box-shadow: 0 0 0 2px var(--primary-color);
+          border-radius: 6px;
+        }
+        .tab-bar button:hover:not(.active) {
+          color: var(--primary-text-color);
         }
         .form-grid {
           display: grid;
@@ -882,30 +927,65 @@ class WaterfallHistoryCardEditor extends HTMLElement {
           align-self: flex-start;
         }
       </style>
-      <ha-tabs scrollable>
+      <div class="tab-bar" role="tablist" aria-label="Karteneinstellungen">
         ${tabs
           .map(
             (label, index) => `
-              <ha-tab data-index="${index}" ${index === this._selectedTab ? 'active' : ''}>${label}</ha-tab>
+              <button
+                type="button"
+                class="tab ${index === this._selectedTab ? 'active' : ''}"
+                data-index="${index}"
+                role="tab"
+                aria-selected="${index === this._selectedTab}"
+                tabindex="${index === this._selectedTab ? '0' : '-1'}"
+              >${label}</button>
             `
           )
           .join('')}
-      </ha-tabs>
+      </div>
       <div class="tab-content">${tabContent}</div>
     `;
 
-    const haTabs = this.shadowRoot.querySelector('ha-tabs');
-    if (haTabs) {
-      haTabs.selected = this._selectedTab;
-      haTabs.querySelectorAll('ha-tab').forEach((tab) => {
-        tab.addEventListener('click', () => {
-          const index = Number(tab.dataset.index || 0);
-          if (index !== this._selectedTab) {
-            this._selectedTab = index;
-            this.render();
-          }
-        });
+    this.shadowRoot.querySelectorAll('.tab-bar button').forEach((tab) => {
+      tab.addEventListener('click', () => {
+        const index = Number(tab.dataset.index || 0);
+        if (index !== this._selectedTab) {
+          this._setSelectedTab(index);
+        }
       });
+
+      tab.addEventListener('keydown', (ev) => {
+        const key = ev.key;
+        if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(key)) {
+          return;
+        }
+
+        ev.preventDefault();
+        const tabCount = tabs.length;
+        let nextIndex = this._selectedTab;
+
+        if (key === 'ArrowLeft') {
+          nextIndex = (this._selectedTab - 1 + tabCount) % tabCount;
+        } else if (key === 'ArrowRight') {
+          nextIndex = (this._selectedTab + 1) % tabCount;
+        } else if (key === 'Home') {
+          nextIndex = 0;
+        } else if (key === 'End') {
+          nextIndex = tabCount - 1;
+        }
+
+        if (nextIndex !== this._selectedTab) {
+          this._setSelectedTab(nextIndex);
+        }
+      });
+    });
+
+    if (this._shouldFocusSelectedTab) {
+      const activeTab = this.shadowRoot.querySelector('.tab-bar button.active');
+      if (activeTab) {
+        activeTab.focus();
+      }
+      this._shouldFocusSelectedTab = false;
     }
 
     this.shadowRoot.querySelectorAll('ha-textfield[data-field]').forEach((input) => {
@@ -1026,8 +1106,7 @@ class WaterfallHistoryCardEditor extends HTMLElement {
   _addEntity() {
     const entities = [...this._entities, { entity: '' }];
     this._config = { ...this._config, entities };
-    this._selectedTab = 2;
-    this.render();
+    this._setSelectedTab(2);
     this._updateConfig();
   }
 
@@ -1040,6 +1119,12 @@ class WaterfallHistoryCardEditor extends HTMLElement {
     this._config = { ...this._config, entities };
     this.render();
     this._updateConfig();
+  }
+
+  _setSelectedTab(index) {
+    this._selectedTab = index;
+    this._shouldFocusSelectedTab = true;
+    this.render();
   }
 
   _updateConfig() {
