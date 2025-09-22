@@ -39,6 +39,25 @@ class waterfallHistoryCard extends HTMLElement {
         hours_ago: 'h ago',
         minutes_ago: 'm ago',
         now: 'Now',
+        language_label: 'Language',
+        language_auto: 'Auto',
+        language_en: 'English',
+        language_de: 'German',
+        language_fr: 'French',
+      },
+      de: {
+        history: 'Verlauf',
+        error_loading_data: 'Fehler beim Laden der Verlaufsdaten',
+        min_label: 'Min',
+        max_label: 'Max',
+        hours_ago: 'Std. zuvor',
+        minutes_ago: 'Min. zuvor',
+        now: 'Jetzt',
+        language_label: 'Sprache',
+        language_auto: 'Auto',
+        language_en: 'Englisch',
+        language_de: 'Deutsch',
+        language_fr: 'Französisch',
       },
       fr: {
         history: 'Historique',
@@ -48,11 +67,19 @@ class waterfallHistoryCard extends HTMLElement {
         hours_ago: 'h',
         minutes_ago: 'min',
         now: 'Actuel',
+        language_label: 'Langue',
+        language_auto: 'Auto',
+        language_en: 'Anglais',
+        language_de: 'Allemand',
+        language_fr: 'Français',
       }
     };
 
     this.language = 'en';
-    this.t = (key) => (this.translations[this.language] && this.translations[this.language][key]) || this.translations.en[key] || key;
+    this.t = (key) => {
+      const lang = this.translations[this.language] ? this.language : 'en';
+      return this.translations[lang][key] ?? this.translations.en[key] ?? key;
+    };
   }
 
   setConfig(config) {
@@ -60,12 +87,18 @@ class waterfallHistoryCard extends HTMLElement {
     this.config = this.config || {};
     // FIX: add show_icons option (default true)
     this.config.show_icons = (config.show_icons !== false);
-if (!config.entities || !Array.isArray(config.entities) || config.entities.length === 0) {
+    this._hasCustomTitle = !!config.title;
+
+    const normalizedLanguage = this.normalizeLanguageOption(config.language ?? 'auto');
+    const fallbackLanguage = normalizedLanguage === 'auto' ? this.language : normalizedLanguage;
+    this.language = this.translations[fallbackLanguage] ? fallbackLanguage : 'en';
+
+    if (!config.entities || !Array.isArray(config.entities) || config.entities.length === 0) {
       throw new Error('Please define a list of entities.');
     }
 
     const globalConfig = {
-        title: config.title || this.t('history'),
+        title: config.title || (this.translations[this.language]?.history ?? this.translations.en.history),
         hours: config.hours || 24,
         intervals: config.intervals || 48,
         height: config.height || 60,
@@ -82,6 +115,7 @@ if (!config.entities || !Array.isArray(config.entities) || config.entities.lengt
         default_value: config.default_value ?? null,
         digits: typeof config.digits === 'number' ? config.digits : 1,
         card_mod: config.card_mod || {},
+        language: normalizedLanguage,
     };
 
     this.config = {
@@ -97,9 +131,23 @@ if (!config.entities || !Array.isArray(config.entities) || config.entities.lengt
 
   set hass(hass) {
     this._hass = hass;
-    if (hass.language) {
-      this.language = hass.language.split('-')[0];
+
+    const configLanguage = this.normalizeLanguageOption(this.config?.language ?? 'auto');
+    let resolvedLanguage = 'en';
+    if (configLanguage === 'auto') {
+      const hassLangSource = hass.selectedLanguage || hass.language || (hass.locale && hass.locale.language) || 'en';
+      const hassLanguage = hassLangSource.toString().split('-')[0].toLowerCase();
+      resolvedLanguage = this.translations[hassLanguage] ? hassLanguage : 'en';
+    } else {
+      resolvedLanguage = this.translations[configLanguage] ? configLanguage : 'en';
     }
+
+    this.language = resolvedLanguage;
+
+    if (!this._hasCustomTitle && this.config) {
+      this.config.title = this.translations[this.language]?.history ?? this.translations.en.history;
+    }
+
     this.updateCard();
     this.updateCurrentValues();
   }
@@ -356,7 +404,28 @@ const history = [...(processedHistories[entityId] || [])];
         }
       });
     });
-}
+  }
+
+  normalizeLanguageOption(option) {
+    if (option === undefined || option === null) return 'auto';
+    const value = String(option).trim().toLowerCase();
+    const map = {
+      auto: 'auto',
+      automatic: 'auto',
+      en: 'en',
+      english: 'en',
+      anglais: 'en',
+      englisch: 'en',
+      de: 'de',
+      german: 'de',
+      deutsch: 'de',
+      fr: 'fr',
+      french: 'fr',
+      francais: 'fr',
+      français: 'fr',
+    };
+    return map[value] || value;
+  }
 
   processHistoryData(historyData, intervals, timeStep, entityConfig) {
     const defaultValue = entityConfig.default_value ?? this.config.default_value;

@@ -64,6 +64,7 @@ entities:
 | `show_current`| `boolean` | `true`  | Show the current value next to the entity name.                             |
 | `show_icons`  | `boolean` | `true`  | Show entity icons globally. Can be overridden per entity.                   |
 | `compact`     | `boolean` | `false` | Use smaller font sizes and spacing.                                         |
+| `language`    | `string`  | `"auto"` | Language for built-in labels. Supports `auto`, `en`, `de`, `fr` (and synonyms such as `english`, `deutsch`, etc.). |
 
 ---
 
@@ -97,6 +98,8 @@ entities:
   - entity: sensor.kitchen_temp
     hours: 6            # custom history window
 ```
+
+To force the card to German regardless of the Home Assistant UI language, set `language: deutsch` (synonyms such as `german` or the short code `de` work as well). The default `auto` follows the UI language when available.
 
 
 ### Styling with Card-mod
