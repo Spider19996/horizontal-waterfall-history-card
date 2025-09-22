@@ -59,6 +59,8 @@ entities:
 | `hours`       | `number`  | `24`    | Time range in hours to show history.                                        |
 | `intervals`   | `number`  | `48`    | Number of intervals (bars) to divide the history into.                      |
 | `height`      | `number`  | `60`    | Height in pixels of each entity’s waterfall chart.                          |
+| `segment_style` | `string` | `"bar"` | Shape of each interval segment. Supports `bar`, `line`, or `dot`.            |
+| `segment_spacing` | `number` | `0`   | Horizontal gap (in pixels) between segments.                                |
 | `show_labels` | `boolean` | `true`  | Show the “X hours ago” / “now” labels under the bar.                        |
 | `show_min_max`| `boolean` | `true`  | Show min/max values under the chart.                                        |
 | `show_current`| `boolean` | `true`  | Show the current value next to the entity name.                             |
@@ -82,6 +84,8 @@ Each item in `entities:` can be either a bare entity ID string, or an object wit
 | `show_min_max` | `boolean` | Inherits from card  | Show/hide min/max just for this entity.                             |
 | `show_current` | `boolean` | Inherits from card  | Show/hide current value just for this entity.                       |
 | `show_icons`   | `boolean` | Inherits from card  | Show/hide the icon for just this entity (overrides global setting). |
+| `segment_style`| `string`  | Inherits from card  | Override the segment shape (`bar`, `line`, `dot`).                  |
+| `segment_spacing`| `number`| Inherits from card  | Override the gap between segments for this entity.                  |
 
 ---
 ### Example
@@ -100,6 +104,21 @@ entities:
 ```
 
 To force the card to German regardless of the Home Assistant UI language, set `language: deutsch` (synonyms such as `german` or the short code `de` work as well). The default `auto` follows the UI language when available.
+
+### Segment styles
+
+The `segment_style` option lets you swap the default solid bar for slimmer `line` markers or rounded `dot` markers. Combine it with `segment_spacing` to introduce breathing room between each interval. For example:
+
+```yaml
+type: custom:horizontal-waterfall-history-card
+segment_style: line
+segment_spacing: 4
+entities:
+  - entity: binary_sensor.door_contact
+    segment_style: dot        # override for this entity only
+    segment_spacing: 6
+```
+
 
 
 ### Styling with Card-mod
