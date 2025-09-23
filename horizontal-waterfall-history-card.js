@@ -1340,24 +1340,13 @@ class WaterfallHistoryCardEditor extends HTMLElement {
                   </mwc-button>
                 </div>
                 <div class="entity-grid">
-                  ${supportsEntityPicker
-                    ? `
-                        <ha-entity-picker
-                          label="Entität"
-                          value="${entity.entity ?? ''}"
-                          data-field="entity"
-                          data-entity-index="${index}"
-                          allow-custom-entity
-                        ></ha-entity-picker>
-                      `
-                    : `
-                        <ha-textfield
-                          label="Entität"
-                          data-field="entity"
-                          data-entity-index="${index}"
-                          value="${entity.entity ?? ''}"
-                        ></ha-textfield>
-                      `}
+                  <ha-entity-picker
+                    label="Entität"
+                    value="${entity.entity ?? ''}"
+                    data-field="entity"
+                    data-entity-index="${index}"
+                    allow-custom-entity
+                  ></ha-entity-picker>
                   <ha-textfield
                     label="Name"
                     data-field="name"
