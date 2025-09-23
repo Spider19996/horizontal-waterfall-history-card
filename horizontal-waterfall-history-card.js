@@ -675,16 +675,27 @@ class waterfallHistoryCard extends HTMLElement {
       }
     }
 
-    if (earliestHistoryIndex !== null) {
-      for (let i = 0; i < earliestHistoryIndex; i++) {
-        processed[i] = 'unavailable';
-      }
-    } else {
-      processed.fill('unavailable');
-    }
-
     const fallbackValue = this.parseState(currentState);
     const hasConfiguredDefault = hasEntityDefault || hasGlobalDefault;
+    const shouldUseDefault = hasConfiguredDefault && resolvedDefault !== null && resolvedDefault !== undefined;
+    const hasFallback = fallbackValue !== null && fallbackValue !== undefined;
+
+    if (earliestHistoryIndex !== null) {
+      for (let i = 0; i < earliestHistoryIndex; i++) {
+        if (processed[i] === null || processed[i] === undefined) {
+          processed[i] = 'unavailable';
+        }
+      }
+    } else {
+      if (shouldUseDefault) {
+        processed.fill(resolvedDefault);
+      } else if (hasFallback) {
+        processed.fill(fallbackValue);
+      } else {
+        processed.fill('unavailable');
+      }
+    }
+
     const hasMeaningfulData = processed.some(value => value !== resolvedDefault);
     const hasAnyHistory = earliestHistoryIndex !== null;
     if (hasAnyHistory && !hasHistoryValues && !hasMeaningfulData && !hasConfiguredDefault && fallbackValue !== null && fallbackValue !== undefined) {
